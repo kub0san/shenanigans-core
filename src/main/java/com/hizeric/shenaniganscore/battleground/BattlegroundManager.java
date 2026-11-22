@@ -196,6 +196,7 @@ public final class BattlegroundManager {
         rounds.flushDiffLedger(arenaStore.activeMapId());
         if (restoreEngine != null) restoreEngine.cancelTierTwo();
         if (restorer != null) restorer.cancel();
+        arenaStore.releasePrewarm();
         staging.clear();
         for (Player online : Bukkit.getOnlinePlayers()) deploys.restoreInventory(online);
         inventories.clear();

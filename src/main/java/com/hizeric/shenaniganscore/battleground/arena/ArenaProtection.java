@@ -3,9 +3,9 @@ package com.hizeric.shenaniganscore.battleground.arena;
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.battleground.BattlegroundDefaults;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot;
+import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshotStore;
 import com.hizeric.shenaniganscore.battleground.command.Permissions;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -29,6 +29,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Solid-at lookup is provided by an immutable {@link ArenaSnapshot}. When no snapshot is
  * available this guard protects nothing and performs no world scan.</p>
+ *
+ * <p>Performance: the active region is resolved once per event (not once per block) and block
+ * tests use plain coordinates, so a 3,000-block explosion no longer allocates 3,000 Locations or
+ * walks the plugin/manager/store chain 3,000 times.</p>
  */
 public final class ArenaProtection implements Listener {
     private static final ArenaProtection INSTANCE = new ArenaProtection();
@@ -55,10 +59,10 @@ public final class ArenaProtection implements Listener {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
         var manager = plugin.getBattlegroundManager();
         ArenaRegion region = manager == null ? null : manager.arenaStore().region();
-        String mapId = manager == null ? com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshotStore.DEFAULT_MAP_ID
+        String mapId = manager == null ? ArenaSnapshotStore.DEFAULT_MAP_ID
                 : manager.arenaStore().activeMapId();
-        ArenaSnapshot snapshot = manager == null ? null : manager.loadSnapshotIfPresent(mapId);
-        reload(region, snapshot);
+        ArenaSnapshot loaded = manager == null ? null : manager.loadSnapshotIfPresent(mapId);
+        reload(region, loaded);
     }
 
     /** Repoints the solid-at lookup; a null provider restores snapshot lookup. */
@@ -130,22 +134,34 @@ public final class ArenaProtection implements Listener {
         return player.hasPermission(Permissions.BG_ADMIN);
     }
 
-    private static boolean inside(ArenaRegion region, Location location) {
-        return region != null && region.contains(location);
+    /** The active region, or null when the plugin or arena is not ready. One lookup per event. */
+    private static ArenaRegion activeRegion() {
+        ShenanigansCore plugin = ShenanigansCore.getInstance();
+        if (plugin == null) return null;
+        var manager = plugin.getBattlegroundManager();
+        return manager == null ? null : manager.arenaStore().region();
+    }
+
+    private static boolean inside(ArenaRegion region, Block block) {
+        return region != null
+                && region.containsBlock(block.getWorld(), block.getX(), block.getY(), block.getZ());
+    }
+
+    /** Captured structure inside the configured region: exactly what this guard protects. */
+    private boolean isProtectedBlock(ArenaRegion region, Block block) {
+        return inside(region, block) && isProtectedAt(block.getX(), block.getY(), block.getZ());
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        ShenanigansCore plugin = ShenanigansCore.getInstance();
-        if (plugin == null) return;
-        ArenaRegion region = plugin.getBattlegroundManager().arenaStore().region();
+        ArenaRegion region = activeRegion();
         Block block = event.getBlock();
-        if (!inside(region, block.getLocation())) return;
+        if (!inside(region, block)) return;
         int x = block.getX(), y = block.getY(), z = block.getZ();
         if (cancelBreak(x, y, z, bypass(event.getPlayer()))) {
             event.setCancelled(true);
             event.getPlayer().sendMessage(MiniMessage.miniMessage()
-                    .deserialize(protectionMessage(plugin)));
+                    .deserialize(BattlegroundDefaults.PROTECTION_MESSAGE));
             return;
         }
         if (!isProtectedAt(x, y, z)) {
@@ -162,11 +178,9 @@ public final class ArenaProtection implements Listener {
      */
     @EventHandler(ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
-        ShenanigansCore plugin = ShenanigansCore.getInstance();
-        if (plugin == null) return;
-        ArenaRegion region = plugin.getBattlegroundManager().arenaStore().region();
+        ArenaRegion region = activeRegion();
         Block block = event.getBlock();
-        if (!inside(region, block.getLocation())) return;
+        if (!inside(region, block)) return;
         int x = block.getX(), y = block.getY(), z = block.getZ();
         if (isSolidAt(x, y, z)) {
             notePlaced(x, y, z);
@@ -175,24 +189,23 @@ public final class ArenaProtection implements Listener {
 
     /**
      * Fluid must flow freely: a captured pond is itself water in the snapshot, so cancelling
-     * flow here froze every water/lava spread. This handler never cancels � it only drops the
+     * flow here froze every water/lava spread. This handler never cancels; it only drops the
      * in-memory player-placed override when a flow replaces the block the player placed.
      */
     @EventHandler(ignoreCancelled = true)
     public void onFluidReplace(BlockFromToEvent event) {
-        ShenanigansCore plugin = ShenanigansCore.getInstance();
-        if (plugin == null) return;
-        ArenaRegion region = plugin.getBattlegroundManager().arenaStore().region();
+        ArenaRegion region = activeRegion();
         Block to = event.getToBlock();
-        if (!inside(region, to.getLocation())) return;
+        if (!inside(region, to)) return;
         noteDestroyed(to.getX(), to.getY(), to.getZ());
     }
 
     /** Fire consuming an arena block is exactly what the captured set protects. */
     @EventHandler(ignoreCancelled = true)
     public void onBurn(BlockBurnEvent event) {
+        ArenaRegion region = activeRegion();
         Block block = event.getBlock();
-        if (isProtectedHere(block.getLocation())) {
+        if (isProtectedBlock(region, block)) {
             if (protectionEnabled()) event.setCancelled(true);
             return;
         }
@@ -212,45 +225,37 @@ public final class ArenaProtection implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onPistonExtend(BlockPistonExtendEvent event) {
-        if (protectionEnabled() && event.getBlocks().stream().anyMatch(this::isCaptured)) {
-            event.setCancelled(true);
-        }
+        if (movesCaptured(event.getBlocks())) event.setCancelled(true);
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onPistonRetract(BlockPistonRetractEvent event) {
-        if (protectionEnabled() && event.getBlocks().stream().anyMatch(this::isCaptured)) {
-            event.setCancelled(true);
+        if (movesCaptured(event.getBlocks())) event.setCancelled(true);
+    }
+
+    private boolean movesCaptured(List<Block> blocks) {
+        if (!protectionEnabled() || blocks.isEmpty()) return false;
+        ArenaRegion region = activeRegion();
+        if (region == null) return false;
+        for (Block block : blocks) {
+            if (isProtectedBlock(region, block)) return true;
         }
+        return false;
     }
 
     /** Strips captured blocks out of an explosion's block list, drops overrides for the rest. */
     private void keepDestructible(List<Block> blocks) {
+        if (blocks.isEmpty()) return;
+        ArenaRegion region = activeRegion();
+        boolean enabled = protectionEnabled();
         Iterator<Block> it = blocks.iterator();
         while (it.hasNext()) {
             Block block = it.next();
-            if (isProtectedHere(block.getLocation())) {
-                if (protectionEnabled()) it.remove();
+            if (isProtectedBlock(region, block)) {
+                if (enabled) it.remove();
             } else {
                 noteDestroyed(block.getX(), block.getY(), block.getZ());
             }
         }
-    }
-
-    /** Captured structure inside the configured region � exactly what this guard protects. */
-    private boolean isProtectedHere(Location location) {
-        ShenanigansCore plugin = ShenanigansCore.getInstance();
-        if (plugin == null) return false;
-        ArenaRegion region = plugin.getBattlegroundManager().arenaStore().region();
-        return inside(region, location)
-                && isProtectedAt(location.getBlockX(), location.getBlockY(), location.getBlockZ());
-    }
-
-    private boolean isCaptured(Block block) {
-        return isProtectedHere(block.getLocation());
-    }
-
-    private static String protectionMessage(ShenanigansCore plugin) {
-        return BattlegroundDefaults.PROTECTION_MESSAGE;
     }
 }

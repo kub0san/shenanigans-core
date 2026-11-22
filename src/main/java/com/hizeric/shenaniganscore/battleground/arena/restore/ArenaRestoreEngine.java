@@ -134,7 +134,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         this.nanoClock = nanoClock;
         // Production gets animations by default; injected-Deps (tests) stay silent.
         this.effects = deps == null
-                ? new RestoreAnimator(RestoreAnimator.Settings.defaults())
+                ? new RestoreAnimator(() -> RestoreAnimator.Settings.from(ArenaRuntimeConfig.current()))
                 : RestoreEffects.NONE;
         this.deps = deps == null ? bukkitDeps(plugin) : deps;
     }

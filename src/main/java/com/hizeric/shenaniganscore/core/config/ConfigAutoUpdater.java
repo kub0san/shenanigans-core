@@ -170,7 +170,11 @@ private static final java.util.List<String> BATTLEGROUND_KEYS = java.util.List.o
             "arena.restore.ms-per-tick",
             "arena.restore.blocks-per-tick",
             "arena.restore.chunks-per-tick",
-            "arena.restore.defer-near-player");
+            "arena.restore.defer-near-player",
+            "arena.restore.animation.enabled",
+            "arena.restore.animation.particles-per-chunk",
+            "arena.restore.animation.sounds",
+            "arena.restore.animation.action-bar");
 
     private static List<String> battlegroundObsoleteKeys() {
         return BATTLEGROUND_KEYS.stream()

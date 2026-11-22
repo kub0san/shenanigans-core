@@ -2,23 +2,44 @@ package com.hizeric.shenaniganscore.battleground.arena;
 
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshotStore;
 import org.bukkit.Bukkit;
-import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.BlockVector;
 import org.spongepowered.configurate.CommentedConfigurationNode;
-import org.spongepowered.configurate.serialize.SerializationException;
 import org.spongepowered.configurate.yaml.YamlConfigurationLoader;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.logging.Level;
 
-/** Persists arena maps, the active map selection, return point and capture metadata. */
+/**
+ * Persists arena maps, the active map selection, return point and capture metadata.
+ *
+ * <p>Changes:</p>
+ * <ul>
+ *   <li><b>Atomic save.</b> arena.yml is written to a temp file and moved into place, so a crash
+ *       mid-save can no longer leave a truncated config.</li>
+ *   <li><b>Prewarm tickets are tracked and released.</b> The old version added a chunk ticket for
+ *       every chunk of the next map and never removed it, so each rotation leaked another map's
+ *       worth of permanently loaded chunks. Old tickets are released before a new prewarm, and a
+ *       late async chunk callback from an outdated prewarm is ignored.</li>
+ *   <li><b>Changing the region invalidates the capture.</b> {@link #setRegion} used to keep the old
+ *       captured-at/blocks values even when the bounds or world changed, leaving metadata that
+ *       described a snapshot of a different area. Same bounds still keep them.</li>
+ * </ul>
+ */
 public final class ArenaStore {
+
+    private record Ticketed(UUID worldId, int x, int z) { }
 
     private final JavaPlugin plugin;
     private final File folder;
@@ -27,6 +48,10 @@ public final class ArenaStore {
     private CommentedConfigurationNode root;
     private final ArenaMapRegistry maps = new ArenaMapRegistry();
     private boolean skipPrewarm;
+
+    /** Main-thread only. */
+    private final List<Ticketed> prewarmed = new ArrayList<>();
+    private volatile int prewarmGeneration;
 
     public ArenaStore(JavaPlugin plugin, File folder) {
         this.plugin = plugin;
@@ -110,14 +135,20 @@ public final class ArenaStore {
 
     public String nextMapId() { return maps.nextMapId(); }
 
+    /** Keeps the next map's chunks loaded so rotation is instant. Releases the previous prewarm first. */
     public void prewarmNextMap() {
         if (skipPrewarm || plugin == null) return;
+        releasePrewarm();
+        final int generation = ++prewarmGeneration;
+
         String next = maps.nextMapId();
         if (next == null || next.isBlank() || next.equals(maps.activeId())) return;
         ArenaRegion nextRegion = maps.region(next);
         if (nextRegion == null) return;
         World world = nextRegion.world();
         if (world == null) return;
+
+        final UUID worldId = world.getUID();
         int minCx = nextRegion.min().getBlockX() >> 4;
         int maxCx = nextRegion.max().getBlockX() >> 4;
         int minCz = nextRegion.min().getBlockZ() >> 4;
@@ -127,14 +158,13 @@ public final class ArenaStore {
                 final int x = cx;
                 final int z = cz;
                 try {
-                    world.getChunkAtAsync(x, z).thenAccept(chunk -> {
-                        if (plugin == null || !plugin.isEnabled()) return;
-                        Bukkit.getGlobalRegionScheduler().execute(plugin, () -> {
-                            if (chunk.isLoaded()) {
+                    world.getChunkAtAsync(x, z).thenAccept(chunk ->
+                            Bukkit.getGlobalRegionScheduler().execute(plugin, () -> {
+                                if (!plugin.isEnabled() || generation != prewarmGeneration) return;
+                                if (!chunk.isLoaded()) return;
                                 chunk.addPluginChunkTicket(plugin);
-                            }
-                        });
-                    });
+                                prewarmed.add(new Ticketed(worldId, x, z));
+                            }));
                 } catch (Throwable ignored) {
                     // Best-effort prewarm only.
                 }
@@ -142,13 +172,29 @@ public final class ArenaStore {
         }
     }
 
+    /** Removes every chunk ticket this store added. Safe to call on disable or before a re-prewarm. */
+    public void releasePrewarm() {
+        prewarmGeneration++; // invalidates callbacks still in flight
+        for (Ticketed ticket : prewarmed) {
+            World world = Bukkit.getWorld(ticket.worldId());
+            if (world != null) world.removePluginChunkTicket(ticket.x(), ticket.z(), plugin);
+        }
+        prewarmed.clear();
+    }
+
     public void setRegion(World world, BlockVector min, BlockVector max) {
         String id = activeOrDefault();
         ArenaRegion existing = maps.region(id);
-        ArenaRegion updated = new ArenaRegion(world.getUID(), world.getName(), min, max,
-                existing == null ? 0L : existing.capturedAt(),
-                existing == null ? 0L : existing.capturedBlocks(),
-                existing == null ? "CLIPBOARD" : existing.captureEngine());
+        ArenaRegion updated = new ArenaRegion(world.getUID(), world.getName(), min, max, 0L, 0L, "CLIPBOARD");
+        // Capture metadata only survives when the footprint is unchanged.
+        boolean sameFootprint = existing != null
+                && Objects.equals(existing.worldId(), world.getUID())
+                && existing.min().equals(updated.min())
+                && existing.max().equals(updated.max());
+        if (sameFootprint) {
+            updated = new ArenaRegion(world.getUID(), world.getName(), min, max,
+                    existing.capturedAt(), existing.capturedBlocks(), existing.captureEngine());
+        }
         if (existing != null && existing.spawn() != null) updated.spawn(existing.spawn());
         maps.put(id, updated);
         save();
@@ -181,24 +227,31 @@ public final class ArenaStore {
         save();
     }
 
+    /** Writes arena.yml via a temp file and an atomic move. */
     public void save() {
         if (root == null) {
             try { root = loader.createNode(); } catch (Exception e) { throw new IllegalStateException(e); }
         }
+        File temp = new File(folder, "arena.yml.tmp");
         try {
             maps.save(root);
-            loader.save(root);
+            Files.createDirectories(folder.toPath());
+            YamlConfigurationLoader.builder().file(temp).build().save(root);
+            try {
+                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             plugin.getLogger().log(Level.SEVERE, "Could not save battleground/arena.yml!", e);
+            temp.delete();
         }
     }
 
     private String activeOrDefault() {
         String id = maps.activeId();
         if (id == null || id.isBlank()) id = ArenaSnapshotStore.DEFAULT_MAP_ID;
-        if (!maps.hasMap(id)) {
-            maps.setActive(id);
-        }
         return id;
     }
 

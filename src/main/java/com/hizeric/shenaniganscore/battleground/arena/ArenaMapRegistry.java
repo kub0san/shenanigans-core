@@ -19,6 +19,10 @@ import java.util.UUID;
 /**
  * N-map arena registry. Persists into arena.yml as either the legacy flat format (single default
  * map) or the N-map format with {@code active} and {@code maps.<id>.*}.
+ *
+ * <p>Fix: {@link #writeRegion} now removes a stale {@code spawn} node when a region has no spawn,
+ * so a cleared return point can no longer reappear after the next reload. {@link #rotate()} and
+ * {@link #nextMapId()} share one implementation.</p>
  */
 public final class ArenaMapRegistry {
 
@@ -55,18 +59,12 @@ public final class ArenaMapRegistry {
     public void save(CommentedConfigurationNode root) throws SerializationException {
         root.node("active").set(activeId);
         // Clear legacy flat keys when writing N-map format.
-        root.removeChild("world");
-        root.removeChild("min");
-        root.removeChild("max");
-        root.removeChild("spawn");
-        root.removeChild("captured-at");
-        root.removeChild("captured-blocks");
-        root.removeChild("capture-engine");
-        root.removeChild("dive");
-        root.removeChild("sky-drop");
-        root.removeChild("drop-zone");
+        for (String legacy : new String[] {"world", "min", "max", "spawn", "captured-at",
+                "captured-blocks", "capture-engine", "dive", "sky-drop", "drop-zone"}) {
+            root.removeChild(legacy);
+        }
         CommentedConfigurationNode mapsNode = root.node("maps");
-        // Remove stale map ids
+        // Remove stale map ids.
         for (Object key : new ArrayList<>(mapsNode.childrenMap().keySet())) {
             String id = normalize(String.valueOf(key));
             if (!maps.containsKey(id)) mapsNode.removeChild(key);
@@ -103,20 +101,16 @@ public final class ArenaMapRegistry {
 
     /** Fixed rotation: advance active to next map in insertion order. No-op with <2 maps. */
     public String rotate() {
-        if (maps.size() < 2) return activeId;
-        List<String> ids = new ArrayList<>(maps.keySet());
-        int idx = ids.indexOf(activeId);
-        int next = (idx < 0 ? 0 : (idx + 1) % ids.size());
-        activeId = ids.get(next);
+        activeId = nextMapId();
         return activeId;
     }
 
+    /** The map that {@link #rotate()} would activate; the active map itself with <2 maps. */
     public String nextMapId() {
         if (maps.size() < 2) return activeId;
         List<String> ids = new ArrayList<>(maps.keySet());
         int idx = ids.indexOf(activeId);
-        int next = (idx < 0 ? 0 : (idx + 1) % ids.size());
-        return ids.get(next);
+        return ids.get(idx < 0 ? 0 : (idx + 1) % ids.size());
     }
 
     private static String normalize(String id) {
@@ -133,7 +127,7 @@ public final class ArenaMapRegistry {
         if (worldName.isBlank() || minNode.virtual() || maxNode.virtual()) return null;
 
         UUID worldId = null;
-        try { if (!worldIdRaw.isBlank()) worldId = UUID.fromString(worldIdRaw); } catch (Exception ignored) {}
+        try { if (!worldIdRaw.isBlank()) worldId = UUID.fromString(worldIdRaw); } catch (Exception ignored) { }
         World world = worldId != null ? Bukkit.getWorld(worldId) : null;
         if (world == null) world = Bukkit.getWorld(worldName);
         if (world != null) {
@@ -141,6 +135,7 @@ public final class ArenaMapRegistry {
             worldName = world.getName();
         }
 
+        // ArenaRegion normalizes min/max, so a swapped pair in arena.yml is repaired on load.
         BlockVector min = new BlockVector(minNode.node("x").getInt(), minNode.node("y").getInt(), minNode.node("z").getInt());
         BlockVector max = new BlockVector(maxNode.node("x").getInt(), maxNode.node("y").getInt(), maxNode.node("z").getInt());
         long capturedAt = node.node("captured-at").getLong(0L);
@@ -157,13 +152,12 @@ public final class ArenaMapRegistry {
             World spawnWorld = spawnWorldName == null || spawnWorldName.isBlank()
                     ? null : Bukkit.getWorld(spawnWorldName);
             if (spawnWorld != null) {
-                Location spawn = new Location(spawnWorld,
+                region.spawn(new Location(spawnWorld,
                         spawnNode.node("x").getDouble(),
                         spawnNode.node("y").getDouble(),
                         spawnNode.node("z").getDouble(),
                         spawnNode.node("yaw").getFloat(),
-                        spawnNode.node("pitch").getFloat());
-                region.spawn(spawn);
+                        spawnNode.node("pitch").getFloat()));
             }
         }
         return region;
@@ -195,6 +189,8 @@ public final class ArenaMapRegistry {
             node.node("spawn").node("z").set(spawn.getZ());
             node.node("spawn").node("yaw").set((double) spawn.getYaw());
             node.node("spawn").node("pitch").set((double) spawn.getPitch());
+        } else {
+            node.removeChild("spawn");
         }
     }
 }

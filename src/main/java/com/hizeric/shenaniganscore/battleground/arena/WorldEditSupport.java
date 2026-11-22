@@ -15,6 +15,9 @@ public final class WorldEditSupport {
 
     private static final String[] PROVIDERS = {"WorldEdit", "FastAsyncWorldEdit", "FAWE"};
 
+    /** Class visibility cannot change while the plugin runs, so the probe runs once. */
+    private static volatile Boolean apiVisible;
+
     private WorldEditSupport() { }
 
     public static boolean isAvailable() {
@@ -46,17 +49,22 @@ public final class WorldEditSupport {
     /**
      * @return true when the WorldEdit API classes are visible to this plugin's classloader.
      *         Uses {@link Class#forName(String, boolean, ClassLoader)} with {@code initialize=false}
-     *         so it never runs static initializers — FAWE's {@code BukkitAdapter} is an enum whose
+     *         so it never runs static initializers: FAWE's {@code BukkitAdapter} is an enum whose
      *         constructor touches the live WorldEdit singleton, which we must not trigger here.
      */
     public static boolean apiVisible() {
+        Boolean cached = apiVisible;
+        if (cached != null) return cached;
+        boolean visible;
         try {
             ClassLoader cl = WorldEditSupport.class.getClassLoader();
             Class.forName("com.sk89q.worldedit.WorldEdit", false, cl);
             Class.forName("com.sk89q.worldedit.bukkit.BukkitAdapter", false, cl);
-            return true;
+            visible = true;
         } catch (Throwable t) {
-            return false;
+            visible = false;
         }
+        apiVisible = visible;
+        return visible;
     }
 }

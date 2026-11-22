@@ -1,6 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.arena.restore;
 
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRegion;
+import com.hizeric.shenaniganscore.battleground.arena.ArenaRuntimeConfig;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot.ChunkPos;
 import com.hizeric.shenaniganscore.core.util.BlockKey;
 import net.kyori.adventure.text.Component;
@@ -18,6 +19,7 @@ import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Restore animation layer: while the arena rebuilds, nearby players see a sweeping shimmer, hear a
@@ -29,7 +31,9 @@ import java.util.List;
  *   <li><b>Chunk outline</b>: a thin shimmer traces the restored chunk's border so the repair reads
  *       as a wave moving across the map.</li>
  *   <li><b>Chime</b>: pitch climbs with overall progress, so the restore "plays a scale".</li>
- *   <li><b>Action bar</b>: {@code Restoring arena ████████░░░░ 63%}, then a toast sound when done.</li>
+ *   <li><b>Boss bar</b>: {@code Restoring arena 63%} with a segmented bar, then a green
+ *       "Deployment ready" state. The action bar is opt-in — it is a single slot shared with the
+ *       technique HUD.</li>
  * </ul>
  *
  * <p>Cost control: nothing runs unless a player is within view distance of the chunk; particles
@@ -43,7 +47,8 @@ public final class RestoreAnimator implements RestoreEffects {
      * @param outline            trace the chunk border with a shimmer
      * @param maxParticlesPerTick hard cap on particle packets requested in one tick
      * @param sounds             chime per chunk, deployment-ready and completion sounds
-     * @param actionBar          show the progress bar
+     * @param actionBar          show the progress bar in the action bar (opt-in)
+     * @param bossBar            show the progress bar on a boss bar
      * @param viewDistance       blocks; chunks farther than this from every viewer are skipped
      */
     public record Settings(boolean enabled, int particlesPerChunk, boolean outline,
@@ -51,9 +56,15 @@ public final class RestoreAnimator implements RestoreEffects {
                            boolean bossBar, int viewDistance) {
 
         public static Settings defaults() {
-            // Action bar is disabled by default: it clashes with the ability HUD's action bar.
-            // Progress is shown on a boss bar instead.
             return new Settings(true, 18, true, 160, true, false, true, 64);
+        }
+
+        /** Live values from {@code arena.restore.animation.*} in the battleground config. */
+        public static Settings from(ArenaRuntimeConfig config) {
+            ArenaRuntimeConfig live = config == null ? ArenaRuntimeConfig.defaults() : config;
+            int particles = live.restoreAnimationParticles();
+            return new Settings(live.restoreAnimationEnabled(), particles, particles > 0, 160,
+                    live.restoreAnimationSounds(), live.restoreAnimationActionBar(), true, 64);
         }
 
         public static Settings off() {
@@ -65,7 +76,9 @@ public final class RestoreAnimator implements RestoreEffects {
     private static final int CHIME_COOLDOWN_TICKS = 3;
     private static final int OUTLINE_STEP = 4;
 
-    private final Settings settings;
+    private final Supplier<Settings> source;
+    /** Re-read from {@link #source} at the start of every restore, so /bg reload applies. */
+    private Settings settings;
 
     private BossBar bossBar;
 
@@ -77,11 +90,17 @@ public final class RestoreAnimator implements RestoreEffects {
     private int lastChimeTick = Integer.MIN_VALUE;
 
     public RestoreAnimator(Settings settings) {
-        this.settings = settings == null ? Settings.defaults() : settings;
+        this(() -> settings == null ? Settings.defaults() : settings);
+    }
+
+    public RestoreAnimator(Supplier<Settings> source) {
+        this.source = source;
+        this.settings = source.get();
     }
 
     @Override
     public void onStart(World world, ArenaRegion region) {
+        settings = source.get();
         percent = 0;
         lastChimeTick = Integer.MIN_VALUE;
         hasBounds = region != null;

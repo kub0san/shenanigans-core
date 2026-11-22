@@ -22,6 +22,21 @@ import java.util.logging.Logger;
  * <p>The shipped values are the source of truth for every key; a missing, invalid or out-of-range
  * value falls back to the shipped default with one warning per key. {@link #load(File, Logger)}
  * atomically replaces {@link #current()}, so a {@code /bg reload} is visible to every later read.</p>
+ *
+ * <p>Every default now lives in exactly one place ({@link #EMPTY}); the loader falls back to those
+ * fields instead of repeating the numbers, so they cannot drift apart.</p>
+ *
+ * <p>New optional keys under {@code arena.restore.animation} (absent keys use the defaults silently,
+ * so existing config files keep working without warnings):</p>
+ * <pre>
+ * arena:
+ *   restore:
+ *     animation:
+ *       enabled: true
+ *       particles-per-chunk: 18   # 0 turns sparkles and the chunk outline off
+ *       sounds: true
+ *       action-bar: false
+ * </pre>
  */
 public final class ArenaRuntimeConfig {
 
@@ -29,7 +44,8 @@ public final class ArenaRuntimeConfig {
             1200, 15, true,
             true,
             true, true, true,
-            30, 256, 4, true);
+            30, 256, 4, true,
+            true, 18, true, false);
 
     private static volatile ArenaRuntimeConfig current = EMPTY;
 
@@ -43,6 +59,8 @@ public final class ArenaRuntimeConfig {
     private static final int BLOCKS_MAX = 4096;
     private static final int CHUNKS_MIN = 1;
     private static final int CHUNKS_MAX = 64;
+    private static final int PARTICLES_MIN = 0;
+    private static final int PARTICLES_MAX = 64;
 
     private final int roundDurationSeconds;
     private final int roundWarningSeconds;
@@ -55,12 +73,18 @@ public final class ArenaRuntimeConfig {
     private final int restoreBlocksPerTick;
     private final int restoreChunksPerTick;
     private final boolean restoreDeferNearPlayer;
+    private final boolean restoreAnimationEnabled;
+    private final int restoreAnimationParticles;
+    private final boolean restoreAnimationSounds;
+    private final boolean restoreAnimationActionBar;
 
     private ArenaRuntimeConfig(int roundDurationSeconds, int roundWarningSeconds, boolean roundPauseWhenEmpty,
                                boolean protectionEnabled, boolean restoreRelight, boolean restoreVerify,
                                boolean restoreFallbackOnUnverified, int restoreMsPerTick,
                                int restoreBlocksPerTick, int restoreChunksPerTick,
-                               boolean restoreDeferNearPlayer) {
+                               boolean restoreDeferNearPlayer, boolean restoreAnimationEnabled,
+                               int restoreAnimationParticles, boolean restoreAnimationSounds,
+                               boolean restoreAnimationActionBar) {
         this.roundDurationSeconds = roundDurationSeconds;
         this.roundWarningSeconds = roundWarningSeconds;
         this.roundPauseWhenEmpty = roundPauseWhenEmpty;
@@ -72,6 +96,10 @@ public final class ArenaRuntimeConfig {
         this.restoreBlocksPerTick = restoreBlocksPerTick;
         this.restoreChunksPerTick = restoreChunksPerTick;
         this.restoreDeferNearPlayer = restoreDeferNearPlayer;
+        this.restoreAnimationEnabled = restoreAnimationEnabled;
+        this.restoreAnimationParticles = restoreAnimationParticles;
+        this.restoreAnimationSounds = restoreAnimationSounds;
+        this.restoreAnimationActionBar = restoreAnimationActionBar;
     }
 
     /** The shipped policy: every value comes from the bundled {@code battleground/config.yml}. */
@@ -95,6 +123,10 @@ public final class ArenaRuntimeConfig {
     public int restoreBlocksPerTick() { return restoreBlocksPerTick; }
     public int restoreChunksPerTick() { return restoreChunksPerTick; }
     public boolean restoreDeferNearPlayer() { return restoreDeferNearPlayer; }
+    public boolean restoreAnimationEnabled() { return restoreAnimationEnabled; }
+    public int restoreAnimationParticles() { return restoreAnimationParticles; }
+    public boolean restoreAnimationSounds() { return restoreAnimationSounds; }
+    public boolean restoreAnimationActionBar() { return restoreAnimationActionBar; }
 
     /** Re-reads {@code file} and installs the result; bad input installs {@link #defaults()}. */
     public static ArenaRuntimeConfig load(File file, Logger logger) {
@@ -118,24 +150,38 @@ public final class ArenaRuntimeConfig {
                 ConfigurationNode round = root.node("arena", "round");
                 ConfigurationNode protection = root.node("arena", "protection");
                 ConfigurationNode restore = root.node("arena", "restore");
+                ConfigurationNode animation = restore.node("animation");
+                ArenaRuntimeConfig d = EMPTY;
                 loaded = new ArenaRuntimeConfig(
                         reader.number(round.node("duration-seconds"), "arena.round.duration-seconds",
-                                1200, ROUND_MIN, ROUND_MAX),
+                                d.roundDurationSeconds, ROUND_MIN, ROUND_MAX),
                         reader.number(round.node("warning-seconds"), "arena.round.warning-seconds",
-                                15, WARNING_MIN, WARNING_MAX),
-                        reader.flag(round.node("pause-when-empty"), "arena.round.pause-when-empty", true),
-                        reader.flag(protection.node("enabled"), "arena.protection.enabled", true),
-                        reader.flag(restore.node("relight"), "arena.restore.relight", true),
-                        reader.flag(restore.node("verify"), "arena.restore.verify", true),
+                                d.roundWarningSeconds, WARNING_MIN, WARNING_MAX),
+                        reader.flag(round.node("pause-when-empty"), "arena.round.pause-when-empty",
+                                d.roundPauseWhenEmpty),
+                        reader.flag(protection.node("enabled"), "arena.protection.enabled",
+                                d.protectionEnabled),
+                        reader.flag(restore.node("relight"), "arena.restore.relight", d.restoreRelight),
+                        reader.flag(restore.node("verify"), "arena.restore.verify", d.restoreVerify),
                         reader.flag(restore.node("fallback-on-unverified"),
-                                "arena.restore.fallback-on-unverified", true),
+                                "arena.restore.fallback-on-unverified", d.restoreFallbackOnUnverified),
                         reader.number(restore.node("ms-per-tick"), "arena.restore.ms-per-tick",
-                                30, MS_MIN, MS_MAX),
+                                d.restoreMsPerTick, MS_MIN, MS_MAX),
                         reader.number(restore.node("blocks-per-tick"), "arena.restore.blocks-per-tick",
-                                256, BLOCKS_MIN, BLOCKS_MAX),
+                                d.restoreBlocksPerTick, BLOCKS_MIN, BLOCKS_MAX),
                         reader.number(restore.node("chunks-per-tick"), "arena.restore.chunks-per-tick",
-                                4, CHUNKS_MIN, CHUNKS_MAX),
-                        reader.flag(restore.node("defer-near-player"), "arena.restore.defer-near-player", true));
+                                d.restoreChunksPerTick, CHUNKS_MIN, CHUNKS_MAX),
+                        reader.flag(restore.node("defer-near-player"), "arena.restore.defer-near-player",
+                                d.restoreDeferNearPlayer),
+                        reader.optionalFlag(animation.node("enabled"), "arena.restore.animation.enabled",
+                                d.restoreAnimationEnabled),
+                        reader.optionalNumber(animation.node("particles-per-chunk"),
+                                "arena.restore.animation.particles-per-chunk",
+                                d.restoreAnimationParticles, PARTICLES_MIN, PARTICLES_MAX),
+                        reader.optionalFlag(animation.node("sounds"), "arena.restore.animation.sounds",
+                                d.restoreAnimationSounds),
+                        reader.optionalFlag(animation.node("action-bar"), "arena.restore.animation.action-bar",
+                                d.restoreAnimationActionBar));
             } catch (IOException | RuntimeException e) {
                 if (logger != null) {
                     logger.log(Level.WARNING,
@@ -183,6 +229,15 @@ public final class ArenaRuntimeConfig {
             }
             reject(key, raw);
             return fallback;
+        }
+
+        /** Like {@link #number} but a key that is simply absent is not a problem. */
+        private int optionalNumber(ConfigurationNode node, String key, int fallback, int min, int max) {
+            return node.raw() == null ? fallback : number(node, key, fallback, min, max);
+        }
+
+        private boolean optionalFlag(ConfigurationNode node, String key, boolean fallback) {
+            return node.raw() == null ? fallback : flag(node, key, fallback);
         }
 
         private void reject(String key, Object raw) {

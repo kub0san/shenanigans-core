@@ -18,14 +18,25 @@ import com.sk89q.worldedit.regions.Region;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 /**
  * The ONLY class that references WorldEdit types. Never touched unless
  * {@link WorldEditSupport#isAvailable()} returned true.
+ *
+ * <p>Changes: edit sessions and file streams are always closed (they leaked when an exception was
+ * thrown); schematics are written to a temp file and moved into place so a crash cannot leave a
+ * half-written {@code main.schem}; and {@link #applySelection} now stores the region in the world
+ * that actually holds the selection, not whichever world the player happens to stand in.</p>
  */
 public final class WorldEditBridge {
 
@@ -34,6 +45,9 @@ public final class WorldEditBridge {
      * no-op rather than reaching WorldEdit's relighter after the provider has gone away.
      */
     private static volatile boolean enabled = true;
+
+    /** Resolved once; never caches a miss so a late-loading provider is still found. */
+    private static volatile ClipboardFormat cachedFormat;
 
     private WorldEditBridge() { }
 
@@ -47,12 +61,8 @@ public final class WorldEditBridge {
             com.sk89q.worldedit.entity.Player actor = BukkitAdapter.adapt(player);
             com.sk89q.worldedit.LocalSession session =
                     WorldEdit.getInstance().getSessionManager().get(actor);
-            // WorldEdit selections are per-world and the selection world is NOT
-            // guaranteed to be the one the player currently stands in. Passing the
-            // player's current world to getSelection(World) throws
-            // IncompleteRegionException whenever the two differ, which made a
-            // perfectly good selection read as "incomplete". Ask the session which
-            // world actually holds the selection (WorldEdit's own documented way).
+            // WorldEdit selections are per-world and the selection world is NOT guaranteed to be
+            // the one the player currently stands in. Ask the session which world holds it.
             com.sk89q.worldedit.world.World world = session.getSelectionWorld();
             if (world == null) {
                 world = BukkitAdapter.adapt(player.getWorld());
@@ -71,16 +81,20 @@ public final class WorldEditBridge {
 
     public static Clipboard capture(Region region) {
         if (disabled() || region == null) return null;
-        EditSession session = editSession(region.getWorld());
+        com.sk89q.worldedit.world.World world = region.getWorld();
+        if (world == null) {
+            throw new IllegalStateException("The selection has no world to capture from");
+        }
         Clipboard clipboard = new BlockArrayClipboard(region);
-        ForwardExtentCopy copy = new ForwardExtentCopy(
-                session, region, clipboard, region.getMinimumPoint());
-        try {
+        try (EditSession session = editSession(world)) {
+            if (session == null) return null;
+            ForwardExtentCopy copy = new ForwardExtentCopy(
+                    session, region, clipboard, region.getMinimumPoint());
             Operations.completeLegacy(copy);
+            session.flushSession();
         } catch (MaxChangedBlocksException e) {
             throw new IllegalStateException("Arena snapshot exceeded WorldEdit's block limit", e);
         }
-        session.flushSession();
         return clipboard;
     }
 
@@ -100,12 +114,22 @@ public final class WorldEditBridge {
         if (disabled()) return false;
         Region selection = selection(player);
         if (selection == null) return false;
-        manager.arenaStore().setRegion(player.getWorld(),
+
+        // Use the world the selection lives in. Using player.getWorld() stored the right
+        // coordinates under the wrong world whenever the player had walked away from it.
+        World world = player.getWorld();
+        com.sk89q.worldedit.world.World selectionWorld = selection.getWorld();
+        if (selectionWorld != null) {
+            World adapted = BukkitAdapter.adapt(selectionWorld);
+            if (adapted != null) world = adapted;
+        }
+        manager.arenaStore().setRegion(world,
                 adapt(selection.getMinimumPoint()),
                 adapt(selection.getMaximumPoint()));
         return true;
     }
 
+    /** Caller owns the session and should close it (it is AutoCloseable). */
     public static EditSession editSession(World bukkitWorld) {
         if (disabled() || bukkitWorld == null) return null;
         return editSession(BukkitAdapter.adapt(bukkitWorld));
@@ -119,35 +143,47 @@ public final class WorldEditBridge {
     /**
      * Resolves a Sponge-schematic format across WorldEdit flavours.
      *
-     * <p>Upstream WorldEdit 7.2 registers the Sponge format under alias {@code sponge};
-     * FAWE 2.x renamed its built-ins and registers Sponge v3 as {@code sponge.3}
-     * (also {@code slow}/{@code safe}) — a plain {@code sponge} alias no longer exists,
-     * so {@code findByAlias("sponge")} returned null and every arena capture failed.
-     * Trying the known aliases makes this work with either provider. Alias strings are
-     * used deliberately (not FAWE-only enum constants like SPONGE_V3_SCHEMATIC) because
-     * this plugin is compiled against upstream WorldEdit 7.2.15, where those constants
-     * do not exist and would fail at runtime with NoSuchFieldError.</p>
+     * <p>Upstream WorldEdit 7.2 registers the Sponge format under alias {@code sponge}; FAWE 2.x
+     * registers Sponge v3 as {@code sponge.3} (also {@code slow}/{@code safe}). Alias strings are
+     * used deliberately (not FAWE-only enum constants) because this plugin is compiled against
+     * upstream WorldEdit 7.2.15, where those constants do not exist.</p>
      */
     private static ClipboardFormat resolveSchematicFormat() {
+        ClipboardFormat cached = cachedFormat;
+        if (cached != null) return cached;
         for (String alias : new String[] {"sponge.3", "sponge", "schem", "slow", "safe"}) {
             ClipboardFormat format = ClipboardFormats.findByAlias(alias);
-            if (format != null) return format;
+            if (format != null) {
+                cachedFormat = format;
+                return format;
+            }
         }
         return null;
     }
 
+    /** Temp file, then move: a crash mid-write leaves the previous schematic intact. */
     public static void save(Clipboard clipboard, File file) throws IOException {
         if (disabled() || clipboard == null || file == null) return;
-        File parent = file.getParentFile();
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            throw new IOException("Could not create " + parent);
-        }
+        Path target = file.toPath().toAbsolutePath();
+        Files.createDirectories(target.getParent());
         ClipboardFormat format = resolveSchematicFormat();
         if (format == null) {
             throw new IOException("No Sponge schematic format available from the WorldEdit provider");
         }
-        try (ClipboardWriter writer = format.getWriter(new FileOutputStream(file))) {
-            writer.write(clipboard);
+        Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            try (OutputStream out = new BufferedOutputStream(Files.newOutputStream(temp));
+                 ClipboardWriter writer = format.getWriter(out)) {
+                writer.write(clipboard);
+            }
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
         }
     }
 
@@ -158,7 +194,8 @@ public final class WorldEditBridge {
         if (format == null) {
             throw new IOException("No Sponge schematic format available from the WorldEdit provider");
         }
-        try (ClipboardReader reader = format.getReader(new FileInputStream(file))) {
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(file.toPath()));
+             ClipboardReader reader = format.getReader(in)) {
             return reader.read();
         }
     }

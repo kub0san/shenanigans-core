@@ -39,3 +39,10 @@ arena:
     chunks-per-tick: 4
     # Defer cells close to living players while restoring.
     defer-near-player: true
+    # Restore animation. Progress stays on the boss bar; the action bar is
+    # opt-in because the technique HUD owns that single slot.
+    animation:
+      enabled: true
+      particles-per-chunk: 18   # 0 disables sparkles and the chunk outline
+      sounds: true
+      action-bar: false
