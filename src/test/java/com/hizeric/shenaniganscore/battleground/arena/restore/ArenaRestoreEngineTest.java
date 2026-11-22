@@ -76,6 +76,7 @@ class ArenaRestoreEngineTest {
     /** Everything the fakes observe during a run. */
     private static final class Fixture {
         final List<Long> writes = new ArrayList<>();
+        final List<Long> physics = new ArrayList<>();
         final List<int[]> players = new ArrayList<>();
         final Deque<Runnable> tasks = new ArrayDeque<>();
     }
@@ -93,7 +94,10 @@ class ArenaRestoreEngineTest {
                                              ArenaRestoreEngine.StateProbe probe,
                                              Runnable onTierOneComplete) {
         Deps deps = new Deps(loader, runner,
-                (world, packed, state, physics) -> fx.writes.add(packed),
+                (world, packed, state, physics) -> {
+                    fx.writes.add(packed);
+                    if (physics) fx.physics.add(packed);
+                },
                 world -> fx.players,
                 probe,
                 () -> policy,
@@ -229,7 +233,7 @@ class ArenaRestoreEngineTest {
         int[] gateCalls = {0};
         // One chunk per tick keeps the shared block budget per chunk; the three-position chunk
         // still needs two slices, so its first slice is a per-job non-final slice with a remainder.
-        Policy oneChunkPerTick = new Policy(100_000, 2, 2, 4, false, false, false, false);
+        Policy oneChunkPerTick = new Policy(100_000, 2, 1, 2, false, false, false, false);
         ArenaRestoreEngine engine = engine(fx, oneChunkPerTick,
                 task -> fx.tasks.add(task), OK_LOADER, STONE, () -> gateCalls[0]++);
         long solo = BlockKey.pack(0, 60, 0);       // chunk (0,0): a single-slice tier-1 chunk
@@ -413,5 +417,122 @@ class ArenaRestoreEngineTest {
         assertEquals(Set.of(tierOne), Set.copyOf(fx.writes),
                 "cancelled tier-2 must not be re-enqueued by tier-1 escalation");
         assertEquals(1, fx.writes.size(), "no duplicate writes");
+    }
+
+    /** RED (a): the section cap used to be checked against the chunk cap, starving dispatch. */
+    @Test
+    void chunksPerTickDispatchesExactlyThatManyChunks() {
+        for (int chunksPerTick : new int[]{1, 4}) {
+            Fixture fx = new Fixture();
+            int[] loads = {0};
+            ArenaRestoreEngine.ChunkLoader counting = (world, cx, cz) -> {
+                loads[0]++;
+                return CompletableFuture.completedFuture(CHUNK);
+            };
+            Policy policy = new Policy(100_000, 1, chunksPerTick,
+                    chunksPerTick * ArenaChunkWork.SECTIONS_PER_CHUNK_CAP,
+                    false, false, false, false);
+            ArenaRestoreEngine engine = engine(fx, policy, task -> { }, counting, STONE);
+            Set<Long> ledger = new LinkedHashSet<>();
+            for (int cz = 0; cz < 4; cz++) {
+                for (int cx = 0; cx < 4; cx++) {
+                    // stay off the stride-3 deployment grid in every chunk
+                    int ox = cx == 2 ? 2 : 1;
+                    int oz = cz == 2 ? 2 : 1;
+                    ledger.add(BlockKey.pack(cx * 16 + ox, 60, cz * 16 + oz));
+                }
+            }
+
+            assertTrue(engine.beginRestore(region(), "ffa", diff(ledger),
+                    stoneChunks(60, 60, 63, 63)));
+            assertTrue(engine.tierOneComplete(), "off-grid diff cells are never tier-1 essentials");
+            engine.restoreStep(null);
+
+            assertEquals(chunksPerTick, loads[0],
+                    "chunksPerTick=" + chunksPerTick + " must dispatch exactly that many chunks");
+        }
+    }
+
+    /** RED (c): a callback from an abandoned generation must not reach processChunk. */
+    @Test
+    void callbackFromPreviousGenerationIsIgnored() {
+        Fixture fx = new Fixture();
+        List<CompletableFuture<Chunk>> futures = new ArrayList<>();
+        ArenaRestoreEngine.ChunkLoader holding = (world, cx, cz) -> {
+            CompletableFuture<Chunk> future = new CompletableFuture<>();
+            futures.add(future);
+            return future;
+        };
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false),
+                task -> fx.tasks.add(task), holding, STONE);
+        long old = BlockKey.pack(1, 60, 1);
+        long latest = BlockKey.pack(2, 60, 2);
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(old)), stoneChunks(15, 15)));
+        engine.restoreStep(null);
+        assertEquals(1, futures.size(), "the first generation has one in-flight load");
+
+        engine.cancel();
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(latest)), stoneChunks(15, 15)));
+
+        futures.get(0).complete(CHUNK);
+        while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+        assertFalse(fx.writes.contains(old), "the stale callback must not apply its old dispatch");
+
+        engine.restoreStep(null);
+        assertEquals(2, futures.size(), "the new generation dispatches its own load");
+        futures.get(1).complete(CHUNK);
+        while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+        assertEquals(Set.of(latest), Set.copyOf(fx.writes), "only the new generation is applied");
+    }
+
+    /** RED (d): cancel() must end the cosmetic layer so a boss bar cannot leak on disable. */
+    @Test
+    void cancelFiresFinishEffect() {
+        Fixture fx = new Fixture();
+        int[] finishes = {0};
+        boolean[] failed = {true};
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false), SYNC, OK_LOADER, STONE);
+        engine.effects(new RestoreEffects() {
+            @Override public void onFinished(World world, boolean wasFailed) {
+                finishes[0]++;
+                failed[0] = wasFailed;
+            }
+        });
+
+        assertTrue(engine.beginRestore(region(), "ffa",
+                diff(set(BlockKey.pack(1, 60, 1))), stoneChunks(15, 15)));
+        engine.cancel();
+        assertEquals(1, finishes[0], "cancel fires the finish effect exactly once");
+        assertFalse(failed[0], "a deliberate cancel is not a failure");
+        assertFalse(engine.isRestoring());
+    }
+
+    /** RED (Step 3): relight's second write is budgeted work, not a free extra write. */
+    @Test
+    void relightSecondWriteIsBilledToTheBlockBudget() {
+        Fixture fx = new Fixture();
+        Policy policy = new Policy(100_000, 2, 4, 8, true, false, false, false);
+        ArenaRestoreEngine engine = engine(fx, policy, SYNC, OK_LOADER, STONE);
+        long first = BlockKey.pack(1, 60, 1);
+        long second = BlockKey.pack(2, 60, 1);
+        Map<ChunkPos, int[]> chunks = new LinkedHashMap<>();
+        int[] cells = new int[ArenaSnapshot.cellCount(0, 60, 0, 15, 60, 15, 0, 0)];
+        Arrays.fill(cells, 1);
+        chunks.put(new ChunkPos(0, 0), cells);
+        ArenaSnapshot water = new ArenaSnapshot("ffa", "world", 0, 60, 0, 15, 60, 15,
+                1L, cells.length, "TEST", List.of(ArenaSnapshot.AIR, "minecraft:water"), chunks);
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(first, second)), water));
+        engine.restoreStep(null);
+
+        assertEquals(2, fx.writes.size(), "one bulk write plus one relight write in this tick");
+        assertEquals(List.of(first), fx.physics, "only the relight re-apply uses physics");
+        assertEquals(Set.of(first), Set.copyOf(fx.writes), "the second cell waits for the next tick");
+
+        drive(engine);
+        assertFalse(engine.isRestoring());
+        assertEquals(Set.of(first, second), Set.copyOf(fx.writes));
+        assertEquals(4, fx.writes.size(), "each cell is written bulk then relight");
     }
 }

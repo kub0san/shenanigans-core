@@ -49,20 +49,30 @@ public final class ArenaChunkWork {
         }
     }
 
-    /** Per-tick millisecond guard plus block, chunk and section caps. */
+    /** Per-tick millisecond guard plus independent block, chunk and section caps. */
     public static final class WorkBudget {
         private final long maxNanos;
         private final int blockCap;
         private final int chunkCap;
+        private final int sectionCap;
         private final LongSupplier nanoClock;
         private long tickStart;
         private int blocks;
         private int chunks;
+        private int sections;
 
         public WorkBudget(int msPerTick, int blocksPerTick, int chunksPerTick, LongSupplier nanoClock) {
+            this(msPerTick, blocksPerTick, chunksPerTick,
+                    Math.max(1, chunksPerTick) * SECTIONS_PER_CHUNK_CAP, nanoClock);
+        }
+
+        /** Explicit section cap, so the engine can pass {@link Policy#sectionsPerTick()} verbatim. */
+        public WorkBudget(int msPerTick, int blocksPerTick, int chunksPerTick,
+                          int sectionsPerTick, LongSupplier nanoClock) {
             this.maxNanos = Math.max(1, msPerTick) * 1_000_000L;
             this.blockCap = Math.max(1, blocksPerTick);
             this.chunkCap = Math.max(1, chunksPerTick);
+            this.sectionCap = Math.max(1, sectionsPerTick);
             this.nanoClock = nanoClock == null ? System::nanoTime : nanoClock;
         }
 
@@ -70,6 +80,7 @@ public final class ArenaChunkWork {
             tickStart = nanoClock.getAsLong();
             blocks = 0;
             chunks = 0;
+            sections = 0;
         }
 
         public boolean canContinue() {
@@ -80,14 +91,19 @@ public final class ArenaChunkWork {
         public void recordBlock() { blocks++; }
 
         public boolean canStartChunk() { return chunks < chunkCap && canContinue(); }
-        public void recordChunk() { chunks++; }
+        public void recordChunk() {
+            chunks++;
+            sections += SECTIONS_PER_CHUNK_CAP;
+        }
 
+        /** Section requests are billed against {@code sectionsPerTick}, never the chunk cap. */
         public boolean canStartSections(int count) {
-            return chunks + Math.max(1, count) <= chunkCap && canContinue();
+            return sections + Math.max(1, count) <= sectionCap && canContinue();
         }
 
         public int blocksThisTick() { return blocks; }
         public int chunksThisTick() { return chunks; }
+        public int sectionsThisTick() { return sections; }
     }
 
     /** A ticket ledger that acquires and releases each key exactly once. */

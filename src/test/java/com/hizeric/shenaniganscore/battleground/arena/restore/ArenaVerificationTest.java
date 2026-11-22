@@ -1,14 +1,29 @@
 package com.hizeric.shenaniganscore.battleground.arena.restore;
 
+import com.hizeric.shenaniganscore.battleground.arena.ArenaRegion;
+import com.hizeric.shenaniganscore.battleground.arena.diff.DiffLog;
+import com.hizeric.shenaniganscore.battleground.arena.restore.ArenaChunkWork.Policy;
+import com.hizeric.shenaniganscore.battleground.arena.restore.ArenaChunkWork.TicketLedger;
+import com.hizeric.shenaniganscore.battleground.arena.restore.ArenaRestoreEngine.Deps;
 import com.hizeric.shenaniganscore.battleground.arena.restore.ArenaVerification.Source;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot.ChunkPos;
 import com.hizeric.shenaniganscore.core.util.BlockKey;
+import org.bukkit.Chunk;
+import org.bukkit.World;
+import org.bukkit.util.BlockVector;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,6 +33,70 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ArenaVerificationTest {
 
     private static final ChunkPos CHUNK = new ChunkPos(0, 0);
+    private static final World WORLD = fakeWorld();
+    private static final Chunk FAKE_CHUNK = fakeChunk();
+
+    @SuppressWarnings("unchecked")
+    private static World fakeWorld() {
+        return (World) Proxy.newProxyInstance(ArenaVerificationTest.class.getClassLoader(),
+                new Class<?>[]{World.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getName" -> "test-world";
+                    case "getPlayers" -> List.of();
+                    case "isChunkLoaded" -> true;
+                    case "toString" -> "FakeWorld";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> null;
+                });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Chunk fakeChunk() {
+        return (Chunk) Proxy.newProxyInstance(ArenaVerificationTest.class.getClassLoader(),
+                new Class<?>[]{Chunk.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "toString" -> "FakeChunk";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> null;
+                });
+    }
+
+    /** Two snapshot chunks (x=0..17 at y=60), so one job per chunk is observable. */
+    private static ArenaSnapshot chunkGrid() {
+        Map<ChunkPos, int[]> chunks = new LinkedHashMap<>();
+        for (ChunkPos pos : List.of(new ChunkPos(0, 0), new ChunkPos(1, 0))) {
+            int[] cells = new int[ArenaSnapshot.cellCount(0, 60, 0, 17, 60, 0, pos.x(), pos.z())];
+            Arrays.fill(cells, 1);
+            chunks.put(pos, cells);
+        }
+        return new ArenaSnapshot("ffa", "world", 0, 60, 0, 17, 60, 0,
+                1L, 18L, "TEST", List.of("minecraft:air", "minecraft:stone"), chunks);
+    }
+
+    private static DiffLog.Decoded emptyDiff(boolean complete) {
+        return new DiffLog.Decoded("ffa", 1L, complete, Set.of(), null);
+    }
+
+    private static ArenaRegion region() {
+        return new ArenaRegion(UUID.randomUUID(), "world",
+                new BlockVector(0, 60, 0), new BlockVector(17, 60, 0), 0L, 1L, "TEST");
+    }
+
+    private static ArenaRestoreEngine engine(boolean verify, List<Long> writes) {
+        Deps deps = new Deps(
+                (world, cx, cz) -> CompletableFuture.completedFuture(FAKE_CHUNK),
+                task -> task.run(),
+                (world, packed, state, physics) -> writes.add(packed),
+                world -> List.of(),
+                (world, x, y, z) -> "minecraft:stone",
+                () -> new Policy(100_000, 1, 4, 8, false, verify, false, false),
+                new TicketLedger<>(key -> { }, key -> { }),
+                WORLD);
+        return new ArenaRestoreEngine(deps, Logger.getLogger("ArenaVerificationTest"), null,
+                () -> 0L);
+    }
 
     /** 2x2 arena, y=60..61; stone floor at y=60, air above. */
     private static ArenaSnapshot snapshot() {
@@ -77,5 +156,38 @@ class ArenaVerificationTest {
         assertEquals(Source.DIFF, ArenaVerification.sourceFor(CHUNK, false, true, untrusted),
                 "verify=false trusts the ledger unconditionally");
         assertEquals(Source.DIFF, ArenaVerification.sourceFor(new ChunkPos(1, 1), true, true, untrusted));
+    }
+
+    /** RED (b): an empty committed diff still verifies every chunk present in the snapshot. */
+    @Test
+    void emptyDiffStillVerifiesEverySnapshotChunk() {
+        List<Long> writes = new ArrayList<>();
+        ArenaRestoreEngine engine = engine(true, writes);
+        ArenaSnapshot arena = chunkGrid();
+
+        assertTrue(engine.beginRestore(region(), "ffa", emptyDiff(true), arena));
+        for (int i = 0; i < 100 && engine.isRestoring(); i++) engine.restoreStep(null);
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(arena.chunkPositions().size(), engine.verifiedChunks(),
+                "every snapshot chunk needs a verification job even with an empty ledger");
+        assertTrue(writes.isEmpty(), "verification-only jobs never write blocks");
+    }
+
+    /** RED (Step 3): an unflushed diff forces verification even when the toggle is off. */
+    @Test
+    void unflushedDiffForcesVerificationEvenWithoutTheToggle() {
+        List<Long> writes = new ArrayList<>();
+        ArenaRestoreEngine engine = engine(false, writes);
+        ArenaSnapshot arena = chunkGrid();
+
+        assertTrue(engine.beginRestore(region(), "ffa", emptyDiff(false), arena));
+        for (int i = 0; i < 100 && engine.isRestoring(); i++) engine.restoreStep(null);
+
+        assertFalse(engine.isRestoring());
+        assertEquals(arena.chunkPositions().size(), engine.verifiedChunks(),
+                "!diff.complete() must override restoreVerify=false");
+        assertTrue(writes.isEmpty());
     }
 }
