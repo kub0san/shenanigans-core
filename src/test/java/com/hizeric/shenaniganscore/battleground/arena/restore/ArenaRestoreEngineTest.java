@@ -508,7 +508,12 @@ class ArenaRestoreEngineTest {
         assertFalse(engine.isRestoring());
     }
 
-    /** RED (Step 3): relight's second write is budgeted work, not a free extra write. */
+    /**
+     * RED (Step 3): relight's second write is budgeted work, not a free extra write. Diff positions
+     * are an unordered set ({@code DiffLog.Decoded} normalises with {@code Set.copyOf}), so which of
+     * the two cells reaches the dispatch first is deliberately unspecified; only the per-tick
+     * budget shape below is deterministic.
+     */
     @Test
     void relightSecondWriteIsBilledToTheBlockBudget() {
         Fixture fx = new Fixture();
@@ -527,8 +532,14 @@ class ArenaRestoreEngineTest {
         engine.restoreStep(null);
 
         assertEquals(2, fx.writes.size(), "one bulk write plus one relight write in this tick");
-        assertEquals(List.of(first), fx.physics, "only the relight re-apply uses physics");
-        assertEquals(Set.of(first), Set.copyOf(fx.writes), "the second cell waits for the next tick");
+        assertEquals(1, fx.physics.size(), "only the relight re-apply uses physics");
+        long relitCell = fx.physics.get(0);
+        assertTrue(Set.of(first, second).contains(relitCell),
+                "relight must target a ledger cell, was " + relitCell);
+        assertEquals(1, Set.copyOf(fx.writes).size(),
+                "one cell is written bulk+relight; the other waits for the next tick: " + fx.writes);
+        assertEquals(relitCell, fx.writes.get(0).longValue(),
+                "the relight must re-apply the cell that was bulk-written");
 
         drive(engine);
         assertFalse(engine.isRestoring());
