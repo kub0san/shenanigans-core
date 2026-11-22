@@ -29,6 +29,16 @@ public final class ArenaInventories {
         snapshots.putIfAbsent(uuid, new Snapshot(contents, cursor));
     }
 
+    /**
+     * Refreshes an existing snapshot (or starts a new one). Unlike {@link #captureOnce}, a later
+     * capture replaces the stale first-deploy contents, so hub items acquired in between survive
+     * the next round boundary instead of being overwritten by the original kit.
+     */
+    public void replace(UUID uuid, Snapshot snapshot) {
+        if (uuid == null || snapshot == null) return;
+        snapshots.put(uuid, snapshot);
+    }
+
     public boolean has(UUID uuid) {
         return uuid != null && snapshots.containsKey(uuid);
     }

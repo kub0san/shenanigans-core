@@ -107,4 +107,18 @@ class RoundGatesTest {
         // Someone never in the mode is not pulled anywhere by a round transition.
         assertEquals(RoundGates.RoundEnd.NONE, RoundGates.roundEnd(false, false, false));
     }
+
+    @Test
+    void secondTierOneGateForTheSameResetDoesNotStartAnotherRound() {
+        // RoundController.onTierOneGateOpen() delegates its guard to this one-shot gate: the
+        // restore engine can fire tier 1 synchronously (empty diff) and again on completion.
+        RoundController.TierOneGate gate = new RoundController.TierOneGate();
+        gate.reset(); // beginReset()
+
+        assertTrue(gate.tryOpen(), "the first tier-1 gate must open the round");
+        assertFalse(gate.tryOpen(), "a duplicate gate for the same reset must not advance the round");
+
+        gate.reset(); // the next reset arms a fresh gate
+        assertTrue(gate.tryOpen(), "a new round gets a fresh one-shot gate");
+    }
 }

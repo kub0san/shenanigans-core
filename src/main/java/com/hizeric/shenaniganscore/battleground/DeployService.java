@@ -73,6 +73,12 @@ final class DeployService {
         ArenaRegion region = m.arenaStore.region();
         RoundGates.Deploy decision = RoundGates.deploy(m.state,
                 region != null && region.isCaptured(), m.isDeployed(player.getUniqueId()));
+        // forceStop() leaves IDLE while a tier-2 restore may still be writing blocks. The pure
+        // gate only sees RoundState, so block a deploy here whenever the engine is still active.
+        if (decision == RoundGates.Deploy.READY && m.state == RoundState.IDLE
+                && m.restoreEngine != null && m.restoreEngine.isRestoring()) {
+            decision = RoundGates.Deploy.RESTORING;
+        }
         if (decision != RoundGates.Deploy.READY) {
             switch (decision) {
                 case NO_ARENA -> player.sendMessage(MiniMessage.miniMessage().deserialize(
@@ -102,9 +108,11 @@ final class DeployService {
         }
         DropZone.Candidate candidate = selection.candidate();
 
-        // Captured once. A later deploy after death is a re-entry, not a new inventory.
-        m.inventories.captureOnce(player.getUniqueId(),
-                player.getInventory().getContents(), player.getItemOnCursor());
+        // Refresh on every deploy: putIfAbsent would keep the first-deploy snapshot forever and
+        // destroy hub items acquired between rounds when the kit is handed back at round end.
+        m.inventories.replace(player.getUniqueId(),
+                new ArenaInventories.Snapshot(player.getInventory().getContents(),
+                        player.getItemOnCursor()));
         player.setItemOnCursor(null);
         m.staging.release(player);
         MenuLatch.get().suppress(player);
