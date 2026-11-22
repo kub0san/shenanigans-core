@@ -1,6 +1,6 @@
 # AGENTS.md — shenanigans-core
 
-Paper PvP plugin: four JJK Domain Expansions + six standalone techniques, played in an arena-mode battleground. Single module, base package `com.hizeric.shenaniganscore`. Java 25, Gradle 9.8.2 wrapper. Personal project, not licensed.
+Paper PvP plugin: four JJK Domain Expansions + six standalone techniques, played in an arena-mode battleground. Single module, base package `com.hizeric.shenaniganscore`. Java 25, Gradle 9.8.2 wrapper. Personal project, licensed under GPL-3.0 (see LICENSE).
 
 **Platform split:** target/main server is **Paper 26.3 (Java 25)**. The **primary local test server** is `C:\Tools\global-test-server-26.3` (Paper 26.3, Java 25, port 25566, Craftwire 0.11.2). `C:\Tools\global-test-server` (Paper 1.21.11, Java 21) is legacy — 1.21.x compatibility and vitaminmcp bot tests only; run one at a time. The plugin compiles against the 1.21.11 API for binary compatibility upward; recheck version-specific behaviour (particles, mappings, reflection) on 26.3 before release. From MC 26.1 Paper is deobfuscated and reobfuscation is unsupported, so use Mojang mappings for 26.x work.
 
