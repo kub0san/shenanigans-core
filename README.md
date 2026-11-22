@@ -36,4 +36,4 @@ See [`AGENTS.md`](AGENTS.md) for architecture, configuration and contributor not
 
 ## License
 
-Personal project. No license is granted; all rights reserved.
+Licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE).
