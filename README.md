@@ -9,6 +9,13 @@ A Paper PvP plugin built around four Jujutsu Kaisen Domain Expansions and six st
 - **Arena mode:** capture, loadouts, killstreak shop, protection and restore system
 - **Resource pack:** bundled, self-hosted HUD and ability icons
 
+## Project layout
+
+- `src/main/java/.../core/` — origin-agnostic utilities (display, sessions, config, particles, network)
+- `src/main/java/.../origins/jujutsukaisen/` — domain expansions and techniques
+- `src/main/java/.../battleground/` — arena mode, economy, combat, menus and storage
+- `resourcepack/` — the self-hosted client pack (HUD atlas, item models, textures)
+
 ## Requirements
 
 - Java 25
@@ -25,6 +32,10 @@ A Paper PvP plugin built around four Jujutsu Kaisen Domain Expansions and six st
 Output: `build/libs/shenanigans-core-1.0-SNAPSHOT-all.jar` (shadow jar). Drop it into the server's `plugins/` folder.
 
 Run tests with `.\gradlew.bat test`.
+
+## Configuration
+
+On first run the plugin generates `config.yml` and `battleground/config.yml`. Technique cooldowns and damage are tuned live in `config.yml`; round length, protection and restore budgets live in `battleground/config.yml`. `/bg reload` reapplies both.
 
 ## Commands
 
