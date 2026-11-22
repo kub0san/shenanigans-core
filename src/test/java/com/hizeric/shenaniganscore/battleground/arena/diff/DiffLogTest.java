@@ -3,6 +3,9 @@ package com.hizeric.shenaniganscore.battleground.arena.diff;
 import com.hizeric.shenaniganscore.core.util.BlockKey;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -97,6 +100,28 @@ class DiffLogTest {
         corrupt[0] ^= 0x7F;
 
         assertFalse(DiffLog.decode(corrupt).complete());
+    }
+
+    @Test
+    void decodeMarksATraversalShapedMapIdUntrustedWithoutThrowing() throws Exception {
+        byte[] id = "../escape".getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (DataOutputStream out = new DataOutputStream(bytes)) {
+            out.writeInt(DiffLog.MAGIC);
+            out.writeInt(DiffLog.VERSION);
+            out.writeInt(id.length);
+            out.write(id);
+            out.writeLong(9L);
+            out.writeInt(0);
+            out.writeByte(1); // committed, so only the bad id can make this untrusted
+        }
+
+        DiffLog.Decoded decoded = DiffLog.decode(bytes.toByteArray());
+
+        assertFalse(decoded.complete());
+        assertEquals("bad map id", decoded.problem());
+        assertEquals("../escape", decoded.mapId());
+        assertEquals(9L, decoded.roundId());
     }
 
     @Test

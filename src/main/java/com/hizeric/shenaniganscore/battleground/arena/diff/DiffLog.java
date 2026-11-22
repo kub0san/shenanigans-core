@@ -126,6 +126,11 @@ public final class DiffLog {
             in.get(id);
             String mapId = new String(id, StandardCharsets.UTF_8);
             long roundId = in.getLong();
+            // The decoded id may later be used as a directory name. Refuse traversal-shaped ids
+            // from untrusted bytes while keeping decode() non-throwing; legacy UTF-8 ids survive.
+            if (!MapIds.isValid(mapId) && !MapIds.isPathSafe(mapId)) {
+                return untrusted(mapId, roundId, Set.of(), "bad map id");
+            }
             int entryCount = in.getInt();
             if (entryCount < 0) {
                 return untrusted(mapId, roundId, Set.of(), "bad entry count");
