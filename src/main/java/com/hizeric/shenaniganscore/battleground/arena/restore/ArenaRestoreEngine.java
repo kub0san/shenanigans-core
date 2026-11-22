@@ -336,6 +336,15 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                                 // Only the owning generation decrements its own in-flight count.
                                 if (dispatchedGeneration == generation) {
                                     pendingLoads = Math.max(0, pendingLoads - 1);
+                                    // A tier-2 boundary cancel may leave no stepper to drain the
+                                    // queue. The last owning callback must finish that restore;
+                                    // the guards keep stale/full-cancel callbacks from refiring
+                                    // onFinished or interfering with a newer generation.
+                                    if (restoring && !queue.cancelled()
+                                            && queue.tierTwoCancelled()
+                                            && queue.jobsEmpty() && pendingLoads == 0) {
+                                        finish();
+                                    }
                                 }
                             }
                         }));

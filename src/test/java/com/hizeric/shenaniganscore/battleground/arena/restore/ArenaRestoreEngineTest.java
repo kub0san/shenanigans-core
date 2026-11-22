@@ -486,6 +486,87 @@ class ArenaRestoreEngineTest {
         assertEquals(Set.of(latest), Set.copyOf(fx.writes), "only the new generation is applied");
     }
 
+    /**
+     * CRITICAL: a tier-2 boundary cancel while a chunk load is in flight must still finish when
+     * that last callback drains pendingLoads — the stepper may already be stopped by the caller.
+     */
+    @Test
+    void cancelTierTwoWithInFlightLoadFinishesOnCallback() {
+        Fixture fx = new Fixture();
+        int[] finishes = {0};
+        boolean[] failed = {true};
+        List<CompletableFuture<Chunk>> futures = new ArrayList<>();
+        ArenaRestoreEngine.ChunkLoader holding = (world, cx, cz) -> {
+            CompletableFuture<Chunk> future = new CompletableFuture<>();
+            futures.add(future);
+            return future;
+        };
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false),
+                task -> fx.tasks.add(task), holding, STONE);
+        engine.effects(new RestoreEffects() {
+            @Override public void onFinished(World world, boolean wasFailed) {
+                finishes[0]++;
+                failed[0] = wasFailed;
+            }
+        });
+
+        assertTrue(engine.beginRestore(region(), "ffa",
+                diff(set(BlockKey.pack(1, 60, 1))), stoneChunks(15, 15)));
+        assertTrue(engine.tierOneComplete(), "an off-grid ledger has no tier-1 work");
+        engine.restoreStep(null);
+        assertEquals(1, futures.size(), "the tier-2 chunk load is in flight");
+
+        engine.cancelTierTwo();
+        assertTrue(engine.isRestoring(), "the in-flight load still owns completion");
+
+        futures.get(0).complete(CHUNK);
+        while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+
+        assertFalse(engine.isRestoring(), "the last callback must finish a tier-2 cancelled restore");
+        assertFalse(engine.restoreFailed());
+        assertEquals(1, finishes[0], "finish effect fires exactly once");
+        assertFalse(failed[0], "a boundary cancel is not a failure");
+        assertTrue(fx.writes.isEmpty(), "a cancelled tier-2 chunk must not be written");
+    }
+
+    /**
+     * Invariant: a full cancel fires finish once, and its stale same-generation in-flight callback
+     * must not fire it again (cancel() leaves phase IDLE, which finish()'s own guard cannot catch).
+     */
+    @Test
+    void fullCancelStaleCallbackDoesNotRefireFinish() {
+        Fixture fx = new Fixture();
+        int[] finishes = {0};
+        List<CompletableFuture<Chunk>> futures = new ArrayList<>();
+        ArenaRestoreEngine.ChunkLoader holding = (world, cx, cz) -> {
+            CompletableFuture<Chunk> future = new CompletableFuture<>();
+            futures.add(future);
+            return future;
+        };
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false),
+                task -> fx.tasks.add(task), holding, STONE);
+        engine.effects(new RestoreEffects() {
+            @Override public void onFinished(World world, boolean wasFailed) { finishes[0]++; }
+        });
+
+        assertTrue(engine.beginRestore(region(), "ffa",
+                diff(set(BlockKey.pack(1, 60, 1))), stoneChunks(15, 15)));
+        engine.restoreStep(null);
+        assertEquals(1, futures.size());
+        long before = engine.generation();
+
+        engine.cancel();
+        assertEquals(1, finishes[0], "full cancel fires finish once");
+
+        futures.get(0).complete(CHUNK);
+        while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+
+        assertEquals(before, engine.generation(), "full cancel leaves the generation unchanged");
+        assertEquals(1, finishes[0], "a stale callback must not refire finish after cancel()");
+        assertFalse(engine.isRestoring());
+        assertTrue(fx.writes.isEmpty(), "a cancelled callback must not write");
+    }
+
     /** RED (d): cancel() must end the cosmetic layer so a boss bar cannot leak on disable. */
     @Test
     void cancelFiresFinishEffect() {
