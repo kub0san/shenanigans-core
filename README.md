@@ -32,8 +32,6 @@ Run tests with `.\gradlew.bat test`.
 - `/ability 1|2|3` (alias `/ab`) — techniques
 - `/bg debug ability <id>` — admin-only domain cast
 
-See [`AGENTS.md`](AGENTS.md) for architecture, configuration and contributor notes.
-
 ## License
 
 Licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE).

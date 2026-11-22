@@ -19,3 +19,9 @@ Thumbs.db
 tools/__pycache__/
 entities.json
 codereview-*.md
+# internal docs / agent metadata (local-only)
+/AGENTS.md
+/AUDIT-REPORT.md
+/GLOSSARY.md
+/mempalace.yaml
+/docs/
