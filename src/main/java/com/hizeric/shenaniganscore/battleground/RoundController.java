@@ -228,7 +228,7 @@ final class RoundController {
 
         Location spawn = world.getSpawnLocation();
         if (safeEvacuation(spawn, region, world)) return spawn;
-        if (region == null) return spawn;
+        if (region == null) return null; // no corners to try: skip an unsafe spawn
 
         int minX = region.min().getBlockX();
         int maxX = region.max().getBlockX();

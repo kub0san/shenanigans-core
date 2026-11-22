@@ -48,11 +48,23 @@ class StagingContractTest {
         // with the hub inventory so an item acquired since then is not destroyed at the next exit.
         UUID uuid = UUID.randomUUID();
         ArenaInventories inventories = new ArenaInventories();
-        inventories.captureOnce(uuid, new ItemStack[41], null); // first deploy
 
+        // 1. first deploy captures the arena kit (41 slots).
+        inventories.captureOnce(uuid, new ItemStack[41], null);
+
+        // 2. an item is acquired in the hub during the round (42 slots on the next restore).
         ItemStack[] hubInventoryWithNewItem = new ItemStack[42];
-        inventories.replace(uuid, new ArenaInventories.Snapshot(hubInventoryWithNewItem, null));
+        ArenaInventories.Snapshot refreshedHub =
+                new ArenaInventories.Snapshot(hubInventoryWithNewItem, null);
 
+        // 3. round boundary: DeployService.restoreInventory() hands the hub kit back, then
+        //    RoundController.beginReset() refreshes the snapshot before staging.enter(). The
+        //    restore-before-enter ordering itself (RoundController.java:183-186) needs live
+        //    managers/Bukkit and is not reproducible in this pure snapshot seam.
+        inventories.replace(uuid, refreshedHub);
+        assertTrue(inventories.has(uuid), "staging.enter must still find the refreshed snapshot");
+
+        // 4. redelivery on the next deploy must carry the new hub item, not the stale first kit.
         ArenaInventories.Snapshot boundary = inventories.take(uuid);
         assertNotNull(boundary);
         assertEquals(42, boundary.contents().length,
