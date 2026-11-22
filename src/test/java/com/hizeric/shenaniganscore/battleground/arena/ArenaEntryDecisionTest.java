@@ -3,6 +3,8 @@ package com.hizeric.shenaniganscore.battleground.arena;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The `/back`-style entry exploit. These are the exact branches `ArenaEntryGuard`
@@ -57,5 +59,25 @@ class ArenaEntryDecisionTest {
     @Test
     void nullInputIsAllowedSoTheGuardNeverBreaks() {
         assertEquals(ArenaEntryDecision.Verdict.ALLOW, ArenaEntryDecision.evaluate(null));
+    }
+
+    @Test
+    void sameBlockAcceptsAnIdenticalTriple() {
+        assertTrue(ArenaEntryDecision.sameBlock(10, 64, -3, 10, 64, -3));
+    }
+
+    @Test
+    void sameBlockRejectsAYOnlyDifference() {
+        assertFalse(ArenaEntryDecision.sameBlock(10, 64, -3, 10, 65, -3));
+    }
+
+    @Test
+    void sameBlockRejectsAnXOnlyDifference() {
+        assertFalse(ArenaEntryDecision.sameBlock(10, 64, -3, 11, 64, -3));
+    }
+
+    @Test
+    void sameBlockRejectsAZOnlyDifference() {
+        assertFalse(ArenaEntryDecision.sameBlock(10, 64, -3, 10, 64, -2));
     }
 }

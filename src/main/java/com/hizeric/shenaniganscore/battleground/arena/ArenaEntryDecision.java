@@ -19,6 +19,11 @@ public final class ArenaEntryDecision {
 
     private ArenaEntryDecision() { }
 
+    /** Whether two block coordinates are the same in all three dimensions. */
+    public static boolean sameBlock(int ax, int ay, int az, int bx, int by, int bz) {
+        return ax == bx && ay == by && az == bz;
+    }
+
     /**
      * Outside the arena there is nothing to guard. Inside, a player must be deployed,
      * staged, an admin, or riding a one-shot token the plugin itself just issued.

@@ -109,7 +109,7 @@ public final class ArenaEntryGuard implements Listener {
 
     // ------------------------------------------------------------ guard
 
-    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
     public void onTeleport(PlayerTeleportEvent event) {
         Location destination = event.getTo();
         if (destination == null) return;
@@ -127,13 +127,15 @@ public final class ArenaEntryGuard implements Listener {
         deny(player);
     }
 
-    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
     public void onMove(PlayerMoveEvent event) {
         Location to = event.getTo();
         Location from = event.getFrom();
         if (to == null) return;
-        // Only horizontal movement matters; looking around must never snap the player.
-        if (from.getBlockX() == to.getBlockX() && from.getBlockZ() == to.getBlockZ()) return;
+        // Only a change of block matters; looking around (or moving within one block) must
+        // never snap the player. Y counts too, or a player could fall in vertically.
+        if (ArenaEntryDecision.sameBlock(from.getBlockX(), from.getBlockY(), from.getBlockZ(),
+                to.getBlockX(), to.getBlockY(), to.getBlockZ())) return;
 
         ShenanigansCore plugin = ShenanigansCore.getInstance();
         ArenaRegion region = activeRegion(plugin);
@@ -148,7 +150,7 @@ public final class ArenaEntryGuard implements Listener {
         deny(player);
     }
 
-    @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
     public void onRespawn(PlayerRespawnEvent event) {
         ShenanigansCore plugin = ShenanigansCore.getInstance();
         ArenaRegion region = activeRegion(plugin);
