@@ -79,25 +79,33 @@ public final class ArenaRegion {
         if (world != null) return world;
         // Lazy fallback: try to load the persisted world from disk once, so a non-default arena
         // world that was not auto-loaded on restart still resolves without a manual visit.
-        if (worldLoadAttempted.getAndSet(true)) return null;
-        File folder = new File(Bukkit.getWorldContainer(), worldName);
-        if (!folder.isDirectory()) return null;
-        try {
-            return Bukkit.createWorld(new WorldCreator(worldName));
-        } catch (Throwable ignored) {
-            return null;
+        // Only a successful create marks the attempt done; a failure remains retryable.
+        if (worldLoadAttempted.get()) return null;
+        synchronized (this) {
+            if (worldLoadAttempted.get()) return null;
+            File folder = new File(Bukkit.getWorldContainer(), worldName);
+            if (!folder.isDirectory()) return null;
+            try {
+                World created = Bukkit.createWorld(new WorldCreator(worldName));
+                if (created == null) return null;
+                worldLoadAttempted.set(true);
+                return created;
+            } catch (Throwable ignored) {
+                return null;
+            }
         }
     }
 
     /**
-     * True when {@code other} is the arena's world. Compares the UUID first, which avoids a world
-     * lookup on the common path (every player move, every block in an explosion).
+     * True when {@code other} is the arena's world. Compares the persisted UUID and then the
+     * persisted name only: this runs on every player move and every block of an explosion, so it
+     * must never trigger the lazy {@link #world()} create. Explicit callers resolve the world once
+     * at load/enable instead.
      */
     public boolean inWorld(World other) {
         if (other == null) return false;
         if (worldId != null && worldId.equals(other.getUID())) return true;
-        World mine = world();
-        return mine != null && mine.equals(other);
+        return worldName != null && worldName.equals(other.getName());
     }
 
     /** Pure coordinate check, no world involved. */

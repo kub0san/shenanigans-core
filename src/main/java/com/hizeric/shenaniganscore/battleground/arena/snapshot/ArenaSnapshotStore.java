@@ -1,9 +1,12 @@
 package com.hizeric.shenaniganscore.battleground.arena.snapshot;
 
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRegion;
+import com.hizeric.shenaniganscore.battleground.arena.MapIds;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot.ChunkPos;
+import org.bukkit.Chunk;
 import org.bukkit.ChunkSnapshot;
 import org.bukkit.World;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
 
 import java.io.IOException;
@@ -21,7 +24,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
 
 /**
  * Disk owner for per-map snapshots: {@code battleground/arena/<mapId>/snapshot.bin}.
@@ -36,7 +38,8 @@ import java.util.regex.Pattern;
 public final class ArenaSnapshotStore {
 
     public static final String DEFAULT_MAP_ID = "default";
-    private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
+    /** Refuse a snapshot larger than this before any byte is read into memory. */
+    static final long MAX_SNAPSHOT_BYTES = 64L * 1024L * 1024L;
     private static final String TMP_SUFFIX = ".tmp";
 
     private final Path arenaRoot;
@@ -48,10 +51,11 @@ public final class ArenaSnapshotStore {
     }
 
     public Path snapshotPath(String mapId) {
-        if (mapId == null || !SAFE_ID.matcher(mapId).matches()) {
+        String normalized = MapIds.normalize(mapId);
+        if (!MapIds.isValid(normalized)) {
             throw new IllegalArgumentException("unsafe arena map id: " + mapId);
         }
-        return arenaRoot.resolve(mapId).resolve("snapshot.bin");
+        return arenaRoot.resolve(normalized).resolve("snapshot.bin");
     }
 
     public boolean exists(String mapId) {
@@ -68,6 +72,11 @@ public final class ArenaSnapshotStore {
             logger.warning("No arena snapshot for map '" + mapId + "' at " + file
                     + " — restore skipped until an admin runs /bg map capture.");
             return null;
+        }
+        long size = Files.size(file);
+        if (size > MAX_SNAPSHOT_BYTES) {
+            throw new IOException("arena snapshot file is too large (" + size + " bytes, max "
+                    + MAX_SNAPSHOT_BYTES + "): " + file);
         }
         return ArenaSnapshotCodec.decode(Files.readAllBytes(file));
     }
@@ -123,12 +132,24 @@ public final class ArenaSnapshotStore {
 
         for (int chunkX = minX >> 4; chunkX <= maxX >> 4; chunkX++) {
             for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; chunkZ++) {
-                ChunkSnapshot chunk = world.getChunkAt(chunkX, chunkZ)
-                        .getChunkSnapshot(false, false, false);
+                Chunk loaded = world.getChunkAt(chunkX, chunkZ);
                 int x0 = Math.max(minX, chunkX * ArenaSnapshot.CHUNK_SIZE);
                 int x1 = Math.min(maxX, chunkX * ArenaSnapshot.CHUNK_SIZE + ArenaSnapshot.CHUNK_SIZE - 1);
                 int z0 = Math.max(minZ, chunkZ * ArenaSnapshot.CHUNK_SIZE);
                 int z1 = Math.min(maxZ, chunkZ * ArenaSnapshot.CHUNK_SIZE + ArenaSnapshot.CHUNK_SIZE - 1);
+                // BlockState#getAsString() cannot carry block-entity NBT. Refuse the capture
+                // rather than silently dropping chest/sign/etc. data from the baseline.
+                for (BlockState state : loaded.getTileEntities()) {
+                    int bx = state.getX(), by = state.getY(), bz = state.getZ();
+                    if (bx >= x0 && bx <= x1 && by >= minY && by <= maxY && bz >= z0 && bz <= z1) {
+                        throw new IllegalArgumentException("Cannot capture arena map '" + mapId
+                                + "': block entity " + state.getType() + " at "
+                                + bx + "," + by + "," + bz + " is inside the region. Snapshots"
+                                + " store block states only and would discard its NBT; remove"
+                                + " block entities and capture again.");
+                    }
+                }
+                ChunkSnapshot chunk = loaded.getChunkSnapshot(false, false, false);
                 int[] cells = new int[ArenaSnapshot.cellCount(minX, minY, minZ, maxX, maxY, maxZ,
                         chunkX, chunkZ)];
                 int offset = 0;

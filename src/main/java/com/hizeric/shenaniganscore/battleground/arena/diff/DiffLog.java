@@ -1,5 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.arena.diff;
 
+import com.hizeric.shenaniganscore.battleground.arena.MapIds;
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -68,8 +70,10 @@ public final class DiffLog {
 
     /** Encodes a round, allowing the writer to emit the uncommitted opening header. */
     public static byte[] encode(String mapId, long roundId, Set<Long> positions, boolean complete) {
-        if (mapId == null || mapId.isBlank()) {
-            throw new IllegalArgumentException("mapId is required");
+        // Canonical lowercase ids satisfy MapIds.isValid; the pure codec still honours legacy
+        // non-ASCII ids, but never one that could escape the per-map directory when used as a path.
+        if (!MapIds.isValid(mapId) && !MapIds.isPathSafe(mapId)) {
+            throw new IllegalArgumentException("Invalid arena map id: " + mapId);
         }
         if (positions == null) {
             throw new IllegalArgumentException("positions is required");
