@@ -1,0 +1,26 @@
+{
+  "ui.click": {
+    "subtitle": "shenanigans.subtitle.ui.click",
+    "sounds": [
+      { "name": "minecraft:ui.button.click", "volume": 0.5, "pitch": 1.05 }
+    ]
+  },
+  "ui.confirm": {
+    "subtitle": "shenanigans.subtitle.ui.confirm",
+    "sounds": [
+      { "name": "minecraft:block.note_block.pling", "volume": 0.45, "pitch": 1.5 }
+    ]
+  },
+  "ui.deny": {
+    "subtitle": "shenanigans.subtitle.ui.deny",
+    "sounds": [
+      { "name": "minecraft:block.note_block.bass", "volume": 0.5, "pitch": 0.7 }
+    ]
+  },
+  "ui.open": {
+    "subtitle": "shenanigans.subtitle.ui.open",
+    "sounds": [
+      { "name": "minecraft:ui.loot.chest.rare", "volume": 0.35, "pitch": 1.2 }
+    ]
+  }
+}

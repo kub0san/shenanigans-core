@@ -1,0 +1,101 @@
+package com.hizeric.shenaniganscore.core.ability;
+
+import com.hizeric.shenaniganscore.core.cooldown.CooldownManager;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.entity.Player;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * The single gate every ability cast passes through, regardless of source.
+ *
+ * <p>Order: extra gates (battleground ownership/region), domain rule, cooldown, then the origin's
+ * performer. Casts are limited by cooldowns alone — there is no mana bar anywhere in the plugin.</p>
+ * <p>{@link CastSource#DEBUG} casts skip the gates, the domain-lock check and the cooldown claim —
+ * they are admin debug casts from the plugin surface, not player-reachable paths.</p>
+ */
+public final class AbilityCaster {
+
+    /** Extra checks installed by the battleground once it exists. */
+    public interface Gate {
+        /** {@link CastResult#OK} to allow the cast, anything else to deny it. */
+        CastResult check(Player player, AbilityDefinition definition, CastSource source);
+    }
+
+    private final AbilityRegistry registry;
+    private final CooldownManager cooldowns;
+    private final List<Gate> gates = new CopyOnWriteArrayList<>();
+    private final MiniMessage miniMessage = MiniMessage.miniMessage();
+
+    public AbilityCaster(AbilityRegistry registry, CooldownManager cooldowns) {
+        this.registry = Objects.requireNonNull(registry, "registry");
+        this.cooldowns = Objects.requireNonNull(cooldowns, "cooldowns");
+    }
+
+    public AbilityRegistry registry() { return registry; }
+
+    /** Installs an extra gate; called once by the battleground manager during enable. */
+    public void addGate(Gate gate) {
+        if (gate != null) gates.add(gate);
+    }
+
+    public CastResult cast(Player player, AbilityId id, CastSource source) {
+        return cast(player, id, source, true);
+    }
+
+    /** @param feedback whether rejection/cast call-out messages should be sent to the player. */
+    public CastResult cast(Player player, AbilityId id, CastSource source, boolean feedback) {
+        if (player == null || id == null) return CastResult.UNKNOWN_ABILITY;
+        AbilityDefinition definition = registry.get(id);
+        if (definition == null) {
+            if (feedback) fail(player, "<red>That ability is not registered.");
+            return CastResult.UNKNOWN_ABILITY;
+        }
+
+        if (source != CastSource.DEBUG) {
+            for (Gate gate : gates) {
+                CastResult result = gate.check(player, definition, source);
+                if (result != null && result != CastResult.OK) {
+                    if (feedback) sendGateFailure(player, result);
+                    return result;
+                }
+            }
+
+            if (definition.isDomainBlocked(player)) {
+                if (feedback) fail(player, "<red>You cannot use a technique while your domain is active!");
+                return CastResult.DOMAIN_LOCKED;
+            }
+
+            UUID uuid = player.getUniqueId();
+            String cooldownKey = id.toString();
+            int cooldownSeconds = definition.cooldownSeconds();
+            // Atomically check-and-claim (F-22): the cooldown is reserved before the
+            // origin performs, so two concurrent casts cannot both pass the gate.
+            if (!cooldowns.tryClaim(uuid, cooldownKey, cooldownSeconds)) {
+                if (feedback) fail(player, "<red>Your ability is not ready yet. "
+                        + "<gray>Ready in <white>" + cooldowns.getRemainingSeconds(uuid, cooldownKey) + "s");
+                return CastResult.COOLDOWN;
+            }
+        }
+
+        definition.perform(player);
+        if (source != CastSource.DEBUG) TechniqueFx.burst(player, id);
+        return CastResult.OK;
+    }
+
+    private void sendGateFailure(Player player, CastResult result) {
+        switch (result) {
+            case NOT_IN_ARENA -> fail(player, "<red>Abilities can only be used inside the battleground.");
+            case NOT_OWNED -> fail(player, "<red>You have not unlocked that technique. <gray>Buy it in the market.");
+            case HELD_ITEM_REQUIRED -> fail(player, "<red>Hold the matching item to use that ability.");
+            default -> fail(player, "<red>You cannot use that ability right now.");
+        }
+    }
+
+    private void fail(Player player, String message) {
+        player.sendMessage(miniMessage.deserialize(message));
+    }
+}

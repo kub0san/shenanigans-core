@@ -1,0 +1,65 @@
+# ShenanigansCore — hard runtime dependency
+#
+# PacketEvents is a hard dependency. The prebuilt PacketEvents plugin owns the API singleton
+# (setAPI/load() in onLoad, init() in onEnable). We never call setAPI; we only read
+# readiness via core/network/PacketEventsBridge and fail loudly if not initialized.
+#
+# The dependency name must match the PacketEvents plugin's own `name:` in its plugin.yml:
+# `packetevents` (lowercase), not `PacketEvents`.
+name: shenanigans-core
+version: '1.0-SNAPSHOT'
+main: com.hizeric.shenaniganscore.ShenanigansCore
+api-version: '1.21'
+authors: [hizeric]
+description: fun abilities and domain expansions go brrr
+
+# Declaring these gives normal players access by default. Undeclared permission nodes
+# fall back to Bukkit's OP-only default, which would block /bg join and /ability.
+permissions:
+  # The seven /bg paths and /ability reuse these two nodes; no new leaf node is needed.
+  # ShenanigansCore.registerPermissions() still declares the LuckPerms umbrella nodes
+  # (shenaniganscore.player / shenaniganscore.admin) and the battleground.play GUI gate at runtime.
+  shenaniganscore.use:
+    description: Use battleground commands and abilities
+    default: true
+  shenaniganscore.battleground.admin:
+    description: Set up the arena and control rounds
+    default: op
+    children:
+      shenaniganscore.battleground.kit: true
+  # Editing the shared server loadout without granting full round/arena administration.
+  shenaniganscore.battleground.kit:
+    description: Edit the shared server loadout
+    default: op
+  # Lets a trusted player use the command roots the in-round policy blocks (F-36).
+  # OP-only: without this declaration the check falls back to Bukkit's OP default,
+  # which silently ignores permission managers that grant it to non-ops.
+  shenaniganscore.battleground.command.bypass:
+    description: Bypass the in-round command policy
+    default: op
+
+dependencies:
+  server:
+    # must match PacketEvents' plugin.yml: name: packetevents (lowercase)
+    packetevents:
+      load: BEFORE
+      required: true
+      join-classpath: true
+    # Optional: the battleground wand and arena snapshot need a WorldEdit API provider.
+    # FastAsyncWorldEdit (FAWE) supplies the same com.sk89q.worldedit API and is supported
+    # as a drop-in. All access is isolated behind battleground.arena.WorldEditBridge,
+    # which is only touched after an availability check.
+    #
+    # The dependency key MUST be the plugin's exact `name:` from its plugin.yml. Paper
+    # matches this key against the installed plugin name: a lowercase key such as
+    # "fastasyncworldedit" does NOT resolve to "FastAsyncWorldEdit". When the dependency
+    # does not resolve, join-classpath never applies, the com.sk89q.worldedit classes stay
+    # invisible to us, and the WorldEdit API falsely reads as "not installed".
+    WorldEdit:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    FastAsyncWorldEdit:
+      load: BEFORE
+      required: false
+      join-classpath: true

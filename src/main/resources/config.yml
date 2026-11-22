@@ -1,0 +1,66 @@
+# ShenanigansCore configuration stub.
+#
+# Most gameplay values are hardcoded in Java (see core/config/GameDefaults and the
+# per-module defaults); the abilities block below is the exception and is tuned live
+# with /bg reload. This file is managed by the global config auto-updater: it
+# keeps config-version current and strips obsolete keys from older installations.
+# Runtime data (arena.yml, shop.yml, players.yml, globalkit.dat) is never touched here.
+config-version: 1
+
+# GUI palette. Mirrors PvpCore's kits interface block: one pane material for the
+# canvas and one accent colour, applied to titles, headings and selected tabs.
+# Any valid Material works for the pane; any MiniMessage hex works for the accent.
+# Reload with /bg reload.
+interface:
+  glass-material: RED_STAINED_GLASS_PANE
+  main-color: "<#e06c75>"
+
+# Custom pixel-art pack: bundled in the jar, self-hosted on a small HTTP
+# listener, and required on join - decliners cannot connect. Restart / reload
+# after changes.
+#
+# host must be an address CLIENTS can reach, NOT 127.0.0.1/localhost: the client
+# resolves it on its own machine, so a loopback URL disconnects every remote
+# player. Leave it empty to advertise a reachable server bind address; if the
+# bind is loopback or a wildcard, a non-virtual IPv4 address of this machine is
+# auto-detected and logged at startup. Set this explicitly if clients cannot
+# reach the detected address. If no usable address exists the pack is disabled
+# with a SEVERE log instead of blocking joins.
+resource-pack:
+  enabled: true
+  port: 8123
+  host: ""
+
+# Technique cast flourish (particles + sound). Domain expansions are unaffected.
+technique-fx:
+  enabled: true
+# Standalone ability tuning. These are the shipped defaults, not an enforced floor;
+# cooldown accepts 1-3600 and damage accepts 0-200. Out-of-range or wrongly typed
+# values are ignored with a warning. Ids use hyphens; underscores are also accepted.
+# Domain expansions are not configured here. Reload with /bg reload.
+abilities:
+  items:
+    dash-sword:
+      cooldown: 30
+  techniques:
+    blue:
+      cooldown: 30
+      damage: 2.0
+    red:
+      cooldown: 40
+      damage: 18.0
+    piercing-blood:
+      cooldown: 45
+      damage: 14.0
+      armor-piercing: true
+    purple:
+      cooldown: 60
+      damage: 24.0
+      armor-piercing: true
+    fuga:
+      cooldown: 75
+      damage: 24.0
+    world-slash:
+      cooldown: 90
+      armor-piercing: true
+

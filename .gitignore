@@ -1,0 +1,21 @@
+.gradle/
+build/
+out/
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+# Eclipse metadata (local-only)
+.classpath
+.project
+.settings/
+# agent / tooling scratch (local-only)
+.snapshots/
+.planning/
+.superpowers/
+.scratch/
+tools/__pycache__/
+entities.json
+codereview-*.md

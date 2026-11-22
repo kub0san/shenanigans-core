@@ -1,0 +1,41 @@
+# ShenanigansCore battleground configuration stub.
+#
+# Most gameplay values are hardcoded in Java (see battleground/BattlegroundDefaults);
+# the live settings below are tunable with /bg reload. This file is managed by the
+# global config auto-updater: it keeps config-version current and strips obsolete
+# keys from older installations. Runtime data (arena.yml, shop.yml, players.yml,
+# globalkit.dat) lives in the same folder but is never touched by the updater.
+config-version: 1
+
+# When false, stored killstreak requirements are ignored: every technique stays
+# reachable without a streak, and the shop and HUD hide the requirement.
+shop:
+  killstreak-requirements: false
+
+# Live arena/round settings. Numbers outside their clamps and non-booleans fall
+# back to the shipped defaults below (one warning per key).
+arena:
+  round:
+    # Round length in seconds (60-86400). The clock pauses when nobody is deployed
+    # unless pause-when-empty is false. Rounds end only on the timer or admin action.
+    duration-seconds: 1200
+    # Final seconds announced as the warning phase (1-300).
+    warning-seconds: 15
+    pause-when-empty: true
+  protection:
+    # Baseline blocks are unbreakable, non-baseline blocks breakable. Domains stay
+    # protected even when this is off.
+    enabled: true
+  restore:
+    # Separate relight pass after bulk writes (for A/B testing).
+    relight: true
+    # Verification scan marks chunks untrusted when unledgered diff positions remain.
+    verify: true
+    # When verify=true, restore untrusted chunks from the per-map snapshot.
+    fallback-on-unverified: true
+    # Per-tick wall-clock guard (1-50ms), block cap (1-4096) and chunk cap (1-64).
+    ms-per-tick: 30
+    blocks-per-tick: 256
+    chunks-per-tick: 4
+    # Defer cells close to living players while restoring.
+    defer-near-player: true

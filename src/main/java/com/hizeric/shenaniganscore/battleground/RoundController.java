@@ -1,0 +1,460 @@
+package com.hizeric.shenaniganscore.battleground;
+
+import com.hizeric.shenaniganscore.battleground.admin.AdminRoundGate;
+import com.hizeric.shenaniganscore.battleground.arena.ArenaProtection;
+import com.hizeric.shenaniganscore.battleground.arena.ArenaRegion;
+import com.hizeric.shenaniganscore.battleground.arena.ArenaRuntimeConfig;
+import com.hizeric.shenaniganscore.battleground.arena.EntitySweeper;
+import com.hizeric.shenaniganscore.battleground.arena.diff.AsyncDiffWriter;
+import com.hizeric.shenaniganscore.battleground.arena.diff.DiffLog;
+import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot;
+import com.hizeric.shenaniganscore.battleground.command.Permissions;
+import com.hizeric.shenaniganscore.battleground.player.BattlegroundLock;
+import com.hizeric.shenaniganscore.core.domain.DomainRegistry;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Set;
+import java.util.UUID;
+import java.util.logging.Level;
+
+/**
+ * Round lifecycle, tiered restore, diff-ledger bookkeeping, admin round actions and config reload.
+ * Extracted from {@link BattlegroundManager} (C1): every round-boundary side effect lives here so a
+ * deploy or capture change cannot silently break the ledger invariant.
+ */
+final class RoundController {
+    private final BattlegroundManager m;
+
+    // C2: three purpose-scoped tasks replace the old 1-tick "does nothing 19/20 ticks" timer.
+    // The restore task is scheduled on demand only while a restore is in flight; HUD and clock
+    // run at their natural cadences. Global-region scheduling is Paper/Folia compatible.
+    private ScheduledTask restoreTask;
+    private ScheduledTask hudTask;
+    private ScheduledTask clockTask;
+
+    RoundController(BattlegroundManager manager) {
+        this.m = manager;
+    }
+
+    // ------------------------------------------------------------------ scheduler
+
+    /** Starts the steady-state HUD (4 Hz) and clock (1 Hz) tasks. */
+    void startScheduler() {
+        Plugin plugin = m.plugin;
+        if (hudTask == null) {
+            hudTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
+                    task -> tickHud(), 5L, 5L);
+        }
+        if (clockTask == null) {
+            clockTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
+                    task -> tickClock(), 20L, 20L);
+        }
+    }
+
+    /** Cancels every task, including an in-flight restore step. */
+    void stopScheduler() {
+        cancel(restoreTask); restoreTask = null;
+        cancel(hudTask); hudTask = null;
+        cancel(clockTask); clockTask = null;
+    }
+
+    private static void cancel(ScheduledTask task) {
+        if (task != null) task.cancel();
+    }
+
+    /** 20 Hz only while a tiered restore is actually running. */
+    private void startRestoreTask() {
+        if (restoreTask != null && !restoreTask.isCancelled()) return;
+        restoreTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(m.plugin,
+                task -> tickRestore(), 1L, 1L);
+    }
+
+    private void stopRestoreTask() {
+        cancel(restoreTask);
+        restoreTask = null;
+    }
+
+    // ------------------------------------------------------------------ tick slices
+
+    private void tickRestore() {
+        if (m.restoreEngine == null || !m.restoreEngine.isRestoring()) {
+            stopRestoreTask();
+            return;
+        }
+        m.budget.beginTick();
+        if (m.restoreEngine.restoreStep(m.budget)) {
+            stopRestoreTask();
+            onRestoreComplete();
+        }
+    }
+
+    private void tickHud() {
+        for (UUID uuid : m.deployed) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null && player.isOnline()) {
+                com.hizeric.shenaniganscore.battleground.ability.TechniqueHud.send(m.plugin, player);
+            }
+        }
+    }
+
+    private void tickClock() {
+        // Tier 2 may continue while the gate is open (RUNNING). Only stage/restoring rounds
+        // must not advance the clock; that state is blocked at the deploy gate, but the old
+        // 1-tick task also checked it here, so keep the guard.
+        if (!isRunningLike()) return;
+
+        // The clock pauses whenever nobody is deployed: time spent shopping or editing in the
+        // hub never burns the round. RoundClock owns the arithmetic.
+        RoundClock.Phase phase = m.clock.tick(m.deployed.size());
+        if (!m.clock.isCounting()) {
+            if (phase == RoundClock.Phase.ENDED) beginReset();
+            return;
+        }
+        if (phase == RoundClock.Phase.WARNING && m.state == RoundState.RUNNING) {
+            m.state = RoundState.WARNING;
+            m.announce("<yellow>Round ending in <white>" + m.clock.secondsRemaining()
+                    + "s<yellow> — return to staging!");
+        }
+        if (phase == RoundClock.Phase.ENDED) beginReset();
+    }
+
+    private boolean isRunningLike() {
+        return m.state == RoundState.RUNNING || m.state == RoundState.WARNING;
+    }
+
+    // ------------------------------------------------------------------ lifecycle
+
+    void beginReset() {
+        if (m.restoreEngine != null && m.restoreEngine.isRestoring()) {
+            // Tier 2 continues while the round is RUNNING/WARNING; cancel it so the new reset can
+            // take over. A STAGING/tier-1 restore must not be interrupted.
+            if (!isRunningLike()) return;
+            m.restoreEngine.cancelTierTwo();
+        }
+        if (m.state == RoundState.RESTORING) return;
+        m.state = RoundState.STAGING;
+
+        // Round end: pull every deployed player back to the hub — including one mid-fight or
+        // mid-dive — and clear their dive/lock state so nothing holds them in the arena.
+        for (UUID uuid : new ArrayList<>(m.deployed)) {
+            Player player = Bukkit.getPlayer(uuid);
+            boolean diving = m.dives.isDiving(uuid);
+            m.dives.clear(uuid);
+            if (player == null) continue;
+            if (RoundGates.roundEnd(true, diving, m.staging.isStaged(player))
+                    != RoundGates.RoundEnd.HUB) continue;
+            com.hizeric.shenaniganscore.battleground.menu.shell.MenuLatch.get().clear(player);
+            m.staging.enter(player);
+            // Evacuate staged players out of the arena footprint so the restore's near-player
+            // deferral cannot stall the rebuild (and so blocks are not written under them).
+            ArenaRegion evacRegion = m.arenaStore.region();
+            org.bukkit.World evacWorld = (evacRegion == null) ? player.getWorld() : evacRegion.world();
+            if (evacWorld == null) evacWorld = player.getWorld();
+            org.bukkit.Location evacDest = evacWorld.getSpawnLocation();
+            if (evacRegion != null && evacRegion.containsHorizontal(evacDest)) {
+                evacDest = new org.bukkit.Location(evacWorld,
+                        evacRegion.min().getBlockX() - 32.0,
+                        evacRegion.max().getBlockY() + 5.0,
+                        evacRegion.min().getBlockZ() - 32.0);
+            }
+            player.teleport(evacDest);
+            player.setAllowFlight(true);
+            player.setFlying(true);
+            m.staging.registry().setAnchor(player.getUniqueId(), evacDest);
+            new com.hizeric.shenaniganscore.battleground.menu.shell.HubScreen(m.plugin, player).show();
+        }
+        m.deployed.clear();
+        m.dives.clear();
+
+        stopDomainsAndSweep();
+        m.economy.rollNewRound();
+
+        flushDiffLedger(m.arenaStore.activeMapId());
+        if (startTieredRestore(m.arenaStore.activeMapId(),
+                readDiffLog(m.arenaStore.activeMapId()), false)) {
+            m.announce("<gray>Restoring arena… <white>Shop is open.");
+            return;
+        }
+        // No tiered restore available: fall back to a safe ready state.
+        onTierOneGateOpen();
+        onRestoreComplete();
+    }
+
+    private boolean startTieredRestore(String mapId, DiffLog.Decoded diff, boolean recovery) {
+        if (m.restoreEngine == null) return false;
+        ArenaRegion region = m.arenaStore.region(mapId);
+        if (region == null) region = m.arenaStore.region();
+        if (region == null) return false;
+        ArenaSnapshot snapshot = loadSnapshotIfPresent(mapId);
+        if (snapshot == null) {
+            m.plugin.getLogger().warning("No arena snapshot for map '" + mapId
+                    + "'; cannot run tiered restore" + (recovery ? " (recovery)" : "") + ".");
+            return false;
+        }
+        DiffLog.Decoded safeDiff = diff == null
+                ? new DiffLog.Decoded(mapId, nextRoundId(), true, Set.of(), null)
+                : diff;
+        if (!safeDiff.mapId().equals(mapId)) {
+            safeDiff = new DiffLog.Decoded(mapId, safeDiff.roundId(), safeDiff.complete(),
+                    safeDiff.positions(), safeDiff.problem());
+        }
+        m.restoreEngine.mapId(mapId);
+        boolean started = m.restoreEngine.beginRestore(region, mapId, safeDiff, snapshot);
+        if (started) {
+            m.state = RoundState.STAGING;
+            startRestoreTask();
+        }
+        return started;
+    }
+
+    /** Called by the restore engine when tier 1 completes (and by recovery fallbacks). */
+    void onTierOneGateOpen() {
+        if (!beginRound("<green>Round <white>" + (m.roundNumber + 1)
+                + "<green> is ready — deploy with /battleground join")) return;
+        m.announce(m.economy.roundSummary());
+    }
+
+    /**
+     * Shared round-start invariants used by tier-1 completion, admin START and the IDLE deploy
+     * fallback. Increments the round counter, resets the clock, opens the diff ledger, prewarms
+     * the next map and moves the battleground into RUNNING.
+     */
+    boolean beginRound(String announcement) {
+        if (isRunningLike()) return false;
+        m.state = RoundState.RUNNING;
+        m.roundNumber++;
+        m.clock.reset();
+        openDiffLedger(m.arenaStore.activeMapId(), m.roundNumber);
+        m.arenaStore.prewarmNextMap();
+        if (announcement != null && !announcement.isBlank()) m.announce(announcement);
+        return true;
+    }
+
+    private void onRestoreComplete() {
+        stopRestoreTask();
+        reloadProtectionNoRescan(m.arenaStore.activeMapId());
+        if (m.restoreEngine != null && RoundGates.restoreNotice(m.restoreEngine.restoreFailed())
+                == RoundGates.RestoreNotice.FAILED) {
+            m.announce("<red>Restore failed — the arena may be dirty. "
+                    + "Restoration will be retried next round.");
+        }
+        // If the tier 1 gate never opened (failure before gate), ensure we don't strand.
+        if (m.state == RoundState.STAGING || m.state == RoundState.RESTORING) {
+            onTierOneGateOpen();
+        }
+    }
+
+    void reloadProtectionNoRescan(String mapId) {
+        ArenaSnapshot snapshot = loadSnapshotIfPresent(mapId);
+        ArenaRegion region = m.arenaStore.region(mapId);
+        if (region == null) region = m.arenaStore.region();
+        if (snapshot == null) {
+            m.plugin.getLogger().warning("Arena snapshot unavailable for map '" + mapId
+                    + "'; keeping previous protection provider (no full-world rescan).");
+            return;
+        }
+        ArenaProtection.get().reload(region, snapshot);
+    }
+
+    ArenaSnapshot loadSnapshotIfPresent(String mapId) {
+        try {
+            if (m.snapshotStore == null || mapId == null || !m.snapshotStore.exists(mapId)) return null;
+            return m.snapshotStore.load(mapId);
+        } catch (Exception e) {
+            m.plugin.getLogger().log(Level.WARNING, "Could not load arena snapshot for " + mapId, e);
+            return null;
+        }
+    }
+
+    private DiffLog.Decoded readDiffLog(String mapId) {
+        AsyncDiffWriter writer = m.plugin.diffWriter();
+        try {
+            if (writer == null || mapId == null) return null;
+            java.nio.file.Path path = writer.logPath(mapId);
+            if (!java.nio.file.Files.isRegularFile(path)) return null;
+            return AsyncDiffWriter.read(path);
+        } catch (Exception e) {
+            m.plugin.getLogger().log(Level.WARNING, "Could not read arena diff log for " + mapId, e);
+            return null;
+        }
+    }
+
+    void flushDiffLedger(String mapId) {
+        AsyncDiffWriter writer = m.plugin.diffWriter();
+        if (writer != null) {
+            try {
+                writer.flushAndClose();
+            } catch (Exception e) {
+                m.plugin.getLogger().log(Level.WARNING,
+                        "Could not flush arena diff ledger for " + mapId, e);
+            }
+        }
+    }
+
+    private void openDiffLedger(String mapId, long roundId) {
+        AsyncDiffWriter writer = m.plugin.diffWriter();
+        if (writer != null && mapId != null && !mapId.isBlank()) writer.open(mapId, roundId);
+    }
+
+    /**
+     * A capture flushes the active round's ledger even when the round stays live; without this
+     * every later block change would be rejected as "round is already closed".
+     */
+    void reopenLedgerIfLive() {
+        if (isRunningLike()) openDiffLedger(m.arenaStore.activeMapId(), m.roundNumber);
+    }
+
+    private long nextRoundId() {
+        return ++m.roundIdCounter;
+    }
+
+    /** Domains claim their blocks; a capture/restore must never bake a live domain floor into the snapshot. */
+    void stopDomainsAndSweep() {
+        m.plugin.getSessionManager().stopAll();
+        if (m.arenaStore.region() != null) EntitySweeper.sweep(m.arenaStore.region());
+    }
+
+    // ------------------------------------------------------------------ admin hooks
+
+    /**
+     * Authorization is enforced at the action site (not left to callers), because the SET TIME
+     * prompt executes up to a minute after its permission-gated click.
+     */
+    AdminRoundGate.Result adminRoundAction(CommandSender actor, AdminRoundGate.Action action,
+                                           int requestedSeconds) {
+        if (actor == null) return AdminRoundGate.Result.deny("No actor for this action.");
+        if (actor instanceof Player player && !player.hasPermission(Permissions.BG_ADMIN)) {
+            return AdminRoundGate.Result.deny("You lack permission to control the round.");
+        }
+        var region = m.arenaStore.region();
+        boolean captured = region != null && region.isCaptured();
+        AdminRoundGate.Result result = AdminRoundGate.decide(action, m.state, captured, requestedSeconds);
+        if (!result.allowed()) return result;
+        switch (result.effect()) {
+            case START -> forceStart();
+            case STOP -> forceStop();
+            case END -> beginReset();
+            case SET_TIME -> m.clock.setRemaining(result.seconds());
+        }
+        return result;
+    }
+
+    boolean forceStart() {
+        var region = m.arenaStore.region();
+        boolean captured = region != null && region.isCaptured();
+        boolean restoring = m.restoreEngine != null && m.restoreEngine.isRestoring();
+        if (!AdminRoundGate.mayForceStart(m.state, captured, restoring)) return false;
+        return beginRound("<green>Round started by an admin.");
+    }
+
+    void forceStop() {
+        // A stopped round is no longer live: commit and close its diff so late events are not
+        // silently queued into a ledger the next beginRound() will clear anyway.
+        flushDiffLedger(m.arenaStore.activeMapId());
+        m.state = RoundState.IDLE;
+        for (UUID uuid : new ArrayList<>(m.deployed)) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null) m.deploys.leave(player);
+        }
+        for (UUID uuid : new ArrayList<>(stagedUuids())) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null) m.staging.exit(player);
+            else {
+                BattlegroundLock.exit(uuid);
+                m.staging.removeSnapshot(uuid);
+            }
+        }
+        m.deployed.clear();
+        m.dives.clear();
+        m.combat.clearAll();
+        m.clock.reset();
+        m.announce("<yellow>Round stopped by an admin.");
+    }
+
+    private Collection<UUID> stagedUuids() {
+        return BattlegroundLock.staged();
+    }
+
+    boolean forceRestore() {
+        if (m.restorer == null || m.arenaStore.region() == null) return false;
+        beginReset();
+        return (m.restoreEngine != null && m.restoreEngine.isRestoring())
+                || m.state == RoundState.RESTORING || m.state == RoundState.STAGING;
+    }
+
+    /** M16: an unclean shutdown is healed at the next enable before anyone can deploy. */
+    void restoreOnEnableIfNeeded() {
+        if (!BattlegroundDefaults.ENABLED || m.restorer == null || m.arenaStore.region() == null) return;
+        String mapId = m.arenaStore.activeMapId();
+        DiffLog.Decoded diff = readDiffLog(mapId);
+        boolean unflushed = diff != null && (!diff.complete() || diff.problem() != null);
+        if (unflushed) {
+            m.plugin.getLogger().warning("Unflushed arena diff detected for map '" + mapId
+                    + "'; verifying against snapshot and restoring untrusted chunks.");
+            m.state = RoundState.STAGING;
+            m.deployed.clear();
+            m.dives.clear();
+            // Recovery is a round boundary too: roll per-round state (streaks, combat, credit
+            // counters) so a crash mid-round cannot carry them into the recovered round.
+            m.economy.rollNewRound();
+            m.clock.reset();
+            stopDomainsAndSweep();
+            if (startTieredRestore(mapId, diff, true)) {
+                m.announce("<gray>Recovering arena after unclean shutdown… <white>Shop is open.");
+                return;
+            }
+            m.plugin.getLogger().warning("Arena recovery could not start for map '" + mapId
+                    + "'; starting a fresh round without auto-capture.");
+            onTierOneGateOpen();
+            onRestoreComplete();
+            return;
+        }
+        beginReset();
+    }
+
+    // ------------------------------------------------------------------ config
+
+    /** Synchronous reload, retained for callers that need the data applied before returning. */
+    void reloadConfig() {
+        ArenaRuntimeConfig.load(
+                new File(new File(m.plugin.getDataFolder(), "battleground"), "config.yml"),
+                m.plugin.getLogger());
+        m.arenaStore.load();
+        DomainRegistry.get().clearClaimsIfIdle();
+    }
+
+    /**
+     * C5: config/updater file I/O runs on Paper's async scheduler so {@code /bg reload} never
+     * blocks the command thread. Bukkit-side effects are marshalled back to the global region.
+     *
+     * @param onComplete receives {@code true} only when every file read succeeded.
+     */
+    void reloadConfigAsync(java.util.function.Consumer<Boolean> onComplete) {
+        Bukkit.getAsyncScheduler().runNow(m.plugin, task -> {
+            boolean success = true;
+            try {
+                new com.hizeric.shenaniganscore.core.config.ConfigAutoUpdater(m.plugin).run();
+                m.plugin.reloadTuning();
+                ArenaRuntimeConfig.load(
+                        new File(new File(m.plugin.getDataFolder(), "battleground"), "config.yml"),
+                        m.plugin.getLogger());
+                m.arenaStore.load();
+            } catch (RuntimeException e) {
+                success = false;
+                m.plugin.getLogger().log(Level.SEVERE, "Async config reload failed", e);
+            }
+            final boolean result = success;
+            Bukkit.getGlobalRegionScheduler().execute(m.plugin, () -> {
+                if (result) DomainRegistry.get().clearClaimsIfIdle();
+                if (onComplete != null) onComplete.accept(result);
+            });
+        });
+    }
+}
