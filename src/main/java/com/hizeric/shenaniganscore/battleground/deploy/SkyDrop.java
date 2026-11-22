@@ -44,9 +44,11 @@ public final class SkyDrop {
     private final LiquidContactHandler liquidHandler;
     private final Consumer<Player> abortHandler;
     // One task and one display set per diver, so player-state cleanup can stop a dive without
-    // waiting for its animation to run to completion.
+    // waiting for its animation to run to completion. The player handle lets cancel() undo the
+    // physical state begin() changed, even when the task has already stopped (e.g. finish()).
     private final Map<UUID, BukkitTask> tasks = new HashMap<>();
     private final Map<UUID, Map<Display, Long>> displaysByUuid = new HashMap<>();
+    private final Map<UUID, Player> players = new HashMap<>();
 
     public SkyDrop(Plugin plugin, DiveService dives, LiquidContactHandler liquidHandler,
                    Consumer<Player> abortHandler) {
@@ -60,9 +62,11 @@ public final class SkyDrop {
     }
 
     /**
-     * Stops one player's dive: cancels its scheduler task, removes its displays and releases the
-     * dive lock. Idempotent, and safe to call from {@link DiveService#clear(UUID)} as well as from
-     * cleanup paths that call this directly.
+     * Stops one player's dive: cancels its scheduler task, removes its displays, restores the
+     * gravity and fall-distance state changed by {@link #begin}, and releases the dive lock.
+     * Idempotent, and safe to call from {@link DiveService#clear(UUID)} as well as from cleanup
+     * paths that call this directly. Velocity is deliberately left untouched: the natural landing
+     * path ({@code finish(true)}) preserves momentum across the {@code dives.clear(uuid)} callback.
      */
     public void cancel(UUID uuid) {
         if (uuid == null) return;
@@ -73,15 +77,21 @@ public final class SkyDrop {
             for (Display display : displays.keySet()) display.remove();
             displays.clear();
         }
+        Player player = players.remove(uuid);
+        if (player != null && player.isOnline()) {
+            player.setGravity(true);
+            player.setFallDistance(0f);
+        }
         // clear(UUID) drops the flag before calling back here; the guard also breaks the loop
         // when cancel(UUID) is the entry point instead.
         if (dives.isDiving(uuid)) dives.clear(uuid);
     }
 
-    /** Used by {@link DiveService#clear()} so every tracked task goes through {@link #cancel(UUID)}. */
+    /** Used by {@link DiveService#clear()} so every tracked dive goes through {@link #cancel(UUID)}. */
     void cancelAll() {
         for (UUID uuid : new ArrayList<>(tasks.keySet())) cancel(uuid);
         for (UUID uuid : new ArrayList<>(displaysByUuid.keySet())) cancel(uuid);
+        for (UUID uuid : new ArrayList<>(players.keySet())) cancel(uuid);
     }
 
     /**
@@ -90,20 +100,22 @@ public final class SkyDrop {
      *              velocity at all.
      */
     public void begin(Player player, Location start, int groundY) {
+        final UUID uuid = player == null ? null : player.getUniqueId();
+        // Evict a stale dive on every begin path, including an invalid start: otherwise its task,
+        // displays and gravity-off state would be orphaned when the guard below aborts.
+        if (uuid != null) cancel(uuid);
         if (player == null || start == null || start.getWorld() == null) {
             if (player != null && abortHandler != null && player.isOnline()) abortHandler.accept(player);
             return;
         }
         final World world = start.getWorld();
-        final UUID uuid = player.getUniqueId();
         final double gx = start.getX();
         final double gz = start.getZ();
         final DropProbe probe = new BukkitDropProbe(world);
 
-        // A repeated begin for the same player must not orphan the earlier task/displays.
-        cancel(uuid);
         final Map<Display, Long> despawnAtTick = new HashMap<>();
         displaysByUuid.put(uuid, despawnAtTick);
+        players.put(uuid, player);
         dives.mark(uuid);
         player.setGravity(false);
         player.setFallDistance(0f);

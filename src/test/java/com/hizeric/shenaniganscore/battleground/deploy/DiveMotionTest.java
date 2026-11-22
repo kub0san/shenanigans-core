@@ -1,5 +1,6 @@
 package com.hizeric.shenaniganscore.battleground.deploy;
 
+import org.bukkit.Location;
 import org.bukkit.scheduler.BukkitTask;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -81,6 +82,10 @@ class DiveMotionTest {
         return pending.get(0);
     }
 
+    private static int queuedTaskCount(ServerMock server) {
+        return ((BukkitSchedulerMock) server.getScheduler()).getPendingTasks().size();
+    }
+
     @Test
     void cancelStopsTheDiveTaskAndClearsTheDivingFlag() {
         DiveHarness harness = startDive();
@@ -116,5 +121,78 @@ class DiveMotionTest {
         assertFalse(harness.server().getScheduler().isQueued(task.getTaskId()),
                 "the no-arg clear must stop tasks too (disable / beginReset callers)");
         assertFalse(harness.dives().isDiving(harness.uuid()));
+    }
+
+    @Test
+    void cancelRestoresGravityAndClearsFallDistance() {
+        DiveHarness harness = startDive();
+        PlayerMock player = (PlayerMock) harness.server().getPlayer(harness.uuid());
+        assertFalse(player.hasGravity(), "begin() must disable gravity while the dive is active");
+
+        harness.skyDrop().cancel(harness.uuid());
+
+        assertTrue(player.hasGravity(), "cancel(UUID) must restore gravity for every external cleanup caller");
+        assertEquals(0f, player.getFallDistance(), 0f,
+                "fall distance accumulated during the dive must not carry over after cancel");
+    }
+
+    @Test
+    void repeatedCancelAndClearThenCancelAreSafe() {
+        DiveHarness harness = startDive();
+        BukkitTask task = onlyQueuedTask(harness.server());
+        PlayerMock player = (PlayerMock) harness.server().getPlayer(harness.uuid());
+
+        harness.skyDrop().cancel(harness.uuid());
+        harness.skyDrop().cancel(harness.uuid());
+        harness.dives().clear(harness.uuid());
+        harness.skyDrop().cancel(harness.uuid());
+
+        assertFalse(harness.server().getScheduler().isQueued(task.getTaskId()),
+                "every cleanup order must leave the task stopped");
+        assertFalse(harness.dives().isDiving(harness.uuid()),
+                "every cleanup order must leave the flag clear");
+        assertTrue(player.hasGravity(), "re-entrant cleanup must not undo gravity restoration");
+    }
+
+    @Test
+    void beginEvictsAStaleDiveForTheSamePlayer() {
+        DiveHarness harness = startDive();
+        onlyQueuedTask(harness.server());
+        PlayerMock player = (PlayerMock) harness.server().getPlayer(harness.uuid());
+        Location start = player.getLocation();
+
+        harness.skyDrop().begin(player, start, start.getBlockY() - 1);
+
+        assertEquals(1, queuedTaskCount(harness.server()),
+                "a repeated begin must leave exactly one queued task");
+        assertTrue(harness.dives().isDiving(harness.uuid()));
+        assertFalse(player.hasGravity(), "the replacement dive must still hold gravity off");
+    }
+
+    @Test
+    void clearAllStopsBothDiversAndRestoresBothGravities() {
+        ServerMock server = MockBukkit.mock();
+        PlayerMock first = server.addPlayer();
+        PlayerMock second = server.addPlayer();
+        DiveService dives = new DiveService();
+        SkyDrop skyDrop = new SkyDrop(MockBukkit.createMockPlugin("SkyDropTwoDivers"), dives,
+                p -> { }, p -> { });
+        Location firstStart = first.getLocation();
+        Location secondStart = second.getLocation();
+        skyDrop.begin(first, firstStart, firstStart.getBlockY() - 1);
+        skyDrop.begin(second, secondStart, secondStart.getBlockY() - 1);
+        List<BukkitTask> pending = ((BukkitSchedulerMock) server.getScheduler()).getPendingTasks();
+        assertEquals(2, pending.size(), "two divers must schedule two tasks");
+
+        dives.clear();
+
+        for (BukkitTask task : pending) {
+            assertFalse(server.getScheduler().isQueued(task.getTaskId()),
+                    "clear() must stop every diver's task");
+        }
+        assertFalse(dives.isDiving(first.getUniqueId()));
+        assertFalse(dives.isDiving(second.getUniqueId()));
+        assertTrue(first.hasGravity(), "first diver's gravity must be restored");
+        assertTrue(second.hasGravity(), "second diver's gravity must be restored");
     }
 }
