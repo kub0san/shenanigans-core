@@ -11,11 +11,13 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -41,6 +43,10 @@ public final class SkyDrop {
     private final DiveService dives;
     private final LiquidContactHandler liquidHandler;
     private final Consumer<Player> abortHandler;
+    // One task and one display set per diver, so player-state cleanup can stop a dive without
+    // waiting for its animation to run to completion.
+    private final Map<UUID, BukkitTask> tasks = new HashMap<>();
+    private final Map<UUID, Map<Display, Long>> displaysByUuid = new HashMap<>();
 
     public SkyDrop(Plugin plugin, DiveService dives, LiquidContactHandler liquidHandler,
                    Consumer<Player> abortHandler) {
@@ -48,6 +54,34 @@ public final class SkyDrop {
         this.dives = dives;
         this.liquidHandler = liquidHandler;
         this.abortHandler = abortHandler;
+        // Registration seam: DiveService.clear(UUID) / clear() call back into cancel without
+        // BattlegroundManager having to wire the two collaborators together after construction.
+        if (dives != null) dives.attach(this);
+    }
+
+    /**
+     * Stops one player's dive: cancels its scheduler task, removes its displays and releases the
+     * dive lock. Idempotent, and safe to call from {@link DiveService#clear(UUID)} as well as from
+     * cleanup paths that call this directly.
+     */
+    public void cancel(UUID uuid) {
+        if (uuid == null) return;
+        BukkitTask task = tasks.remove(uuid);
+        if (task != null) task.cancel();
+        Map<Display, Long> displays = displaysByUuid.remove(uuid);
+        if (displays != null) {
+            for (Display display : displays.keySet()) display.remove();
+            displays.clear();
+        }
+        // clear(UUID) drops the flag before calling back here; the guard also breaks the loop
+        // when cancel(UUID) is the entry point instead.
+        if (dives.isDiving(uuid)) dives.clear(uuid);
+    }
+
+    /** Used by {@link DiveService#clear()} so every tracked task goes through {@link #cancel(UUID)}. */
+    void cancelAll() {
+        for (UUID uuid : new ArrayList<>(tasks.keySet())) cancel(uuid);
+        for (UUID uuid : new ArrayList<>(displaysByUuid.keySet())) cancel(uuid);
     }
 
     /**
@@ -66,20 +100,29 @@ public final class SkyDrop {
         final double gz = start.getZ();
         final DropProbe probe = new BukkitDropProbe(world);
 
+        // A repeated begin for the same player must not orphan the earlier task/displays.
+        cancel(uuid);
+        final Map<Display, Long> despawnAtTick = new HashMap<>();
+        displaysByUuid.put(uuid, despawnAtTick);
         dives.mark(uuid);
         player.setGravity(false);
         player.setFallDistance(0f);
         player.setVelocity(new Vector(0, 0, 0));
 
-        new BukkitRunnable() {
+        BukkitRunnable runnable = new BukkitRunnable() {
             int tick = 0;
             int diveTick = 0;
             Phase phase = Phase.LOCK;
             Location last = start.clone();
-            final Map<Display, Long> despawnAtTick = new HashMap<>();
 
             @Override
             public void run() {
+                // The diving flag is the single source of truth: a cleared dive never ticks again,
+                // even if a scheduler callback was already queued when cleanup happened.
+                if (!dives.isDiving(uuid)) {
+                    SkyDrop.this.cancel(uuid);
+                    return;
+                }
                 if (!player.isOnline() || player.isDead() || player.getWorld() != world) {
                     finish(false);
                     cancel();
@@ -177,7 +220,8 @@ public final class SkyDrop {
                 for (Display display : despawnAtTick.keySet()) display.remove();
                 despawnAtTick.clear();
             }
-        }.runTaskTimer(plugin, 1L, 1L);
+        };
+        tasks.put(uuid, runnable.runTaskTimer(plugin, 1L, 1L));
     }
 
     /** True when a non-air block sits in the next few blocks of the descent column. */

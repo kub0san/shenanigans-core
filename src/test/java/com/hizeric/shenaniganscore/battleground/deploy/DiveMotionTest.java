@@ -1,8 +1,18 @@
 package com.hizeric.shenaniganscore.battleground.deploy;
 
+import org.bukkit.scheduler.BukkitTask;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
+import org.mockbukkit.mockbukkit.entity.PlayerMock;
+import org.mockbukkit.mockbukkit.scheduler.BukkitSchedulerMock;
+
+import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -46,5 +56,65 @@ class DiveMotionTest {
             assertEquals(0.0, velocity.x(), 1e-9);
             assertEquals(0.0, velocity.z(), 1e-9);
         }
+    }
+
+    @AfterEach
+    void unmockBukkit() {
+        MockBukkit.unmock();
+    }
+
+    private record DiveHarness(ServerMock server, UUID uuid, DiveService dives, SkyDrop skyDrop) { }
+
+    private static DiveHarness startDive() {
+        ServerMock server = MockBukkit.mock();
+        PlayerMock player = server.addPlayer();
+        DiveService dives = new DiveService();
+        SkyDrop skyDrop = new SkyDrop(MockBukkit.createMockPlugin("SkyDropTest"), dives, p -> { }, p -> { });
+        var start = player.getLocation();
+        skyDrop.begin(player, start, start.getBlockY() - 1);
+        return new DiveHarness(server, player.getUniqueId(), dives, skyDrop);
+    }
+
+    private static BukkitTask onlyQueuedTask(ServerMock server) {
+        List<BukkitTask> pending = ((BukkitSchedulerMock) server.getScheduler()).getPendingTasks();
+        assertEquals(1, pending.size(), "one BukkitTask is scheduled per dive");
+        return pending.get(0);
+    }
+
+    @Test
+    void cancelStopsTheDiveTaskAndClearsTheDivingFlag() {
+        DiveHarness harness = startDive();
+        BukkitTask task = onlyQueuedTask(harness.server());
+
+        harness.skyDrop().cancel(harness.uuid());
+
+        assertFalse(harness.server().getScheduler().isQueued(task.getTaskId()),
+                "cancel(UUID) must stop the per-dive task");
+        assertFalse(harness.dives().isDiving(harness.uuid()),
+                "cancel(UUID) must release the dive lock");
+    }
+
+    @Test
+    void clearByUuidAlsoStopsTheDiveTask() {
+        DiveHarness harness = startDive();
+        BukkitTask task = onlyQueuedTask(harness.server());
+
+        harness.dives().clear(harness.uuid());
+
+        assertFalse(harness.server().getScheduler().isQueued(task.getTaskId()),
+                "every DiveService.clear(UUID) caller is covered without editing RoundController");
+        assertFalse(harness.dives().isDiving(harness.uuid()));
+    }
+
+    @Test
+    void clearAllStopsEveryDiveTask() {
+        DiveHarness harness = startDive();
+        BukkitTask task = onlyQueuedTask(harness.server());
+
+        harness.dives().clear();
+
+        assertFalse(harness.server().getScheduler().isQueued(task.getTaskId()),
+                "the no-arg clear must stop tasks too (disable / beginReset callers)");
+        assertFalse(harness.dives().isDiving(harness.uuid()));
     }
 }

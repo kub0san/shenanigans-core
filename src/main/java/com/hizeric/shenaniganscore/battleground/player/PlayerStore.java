@@ -68,6 +68,9 @@ public final class PlayerStore {
             }
             flushTask = Bukkit.getScheduler().runTaskTimer(plugin, this::flushDirty, 100L, 100L);
         }
+        // Players already online at enable (restart / plugman reload) must have their records in
+        // the cache before the first get(); later joins are preloaded by the pre-login listener.
+        preloadOnline();
     }
 
     public void disable() {
