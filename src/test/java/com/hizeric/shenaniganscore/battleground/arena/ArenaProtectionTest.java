@@ -214,6 +214,17 @@ class ArenaProtectionTest {
     }
 
     @Test
+    void reloadPreservingPlacedKeepsPlayerPlacedOverrides() {
+        ArenaProtection protection = withSnapshot(2, 3, 4);
+        protection.notePlaced(2, 3, 4);
+        assertFalse(protection.isProtectedAt(2, 3, 4));
+
+        protection.reloadPreservingPlaced(snapshotOf(2, 3, 4));
+        assertFalse(protection.isProtectedAt(2, 3, 4),
+                "a live capture keeps the round running, so player-placed overrides must survive");
+    }
+
+    @Test
     void packLayoutIsVerbatim() {
         assertEquals(275_012_124_675L, ArenaProtection.pack(1, 2, 3),
                 "26 bits x, 12 bits y, 26 bits z");
