@@ -188,7 +188,7 @@ public final class DropZone {
             return;
         }
         counts[0]++;
-        if (!stable(probe, x, z, surface.y())) return;
+        if (!stable(probe, x, z, surface.y(), config)) return;
         int flat = flatDeviation(probe, x, z, surface.y(), config, surfaces);
         int obs = obstructions(probe, x, z, surface.y(), config);
         int spawnY = spawnY(probe, x, z, surface.y(), config);
@@ -224,15 +224,33 @@ public final class DropZone {
         return result;
     }
 
-    /** Reject single-block pillars and leaf platforms: needs support below and a lateral neighbour. */
-    private static boolean stable(DropProbe probe, int x, int z, int y) {
-        if (!probe.isSolid(x, y - 1, z)) return false;
-        int solidNeighbours = 0;
-        if (probe.isSolid(x - 1, y, z)) solidNeighbours++;
-        if (probe.isSolid(x + 1, y, z)) solidNeighbours++;
-        if (probe.isSolid(x, y, z - 1)) solidNeighbours++;
-        if (probe.isSolid(x, y, z + 1)) solidNeighbours++;
-        return solidNeighbours >= 1;
+    /** Reject pillars and floating platforms: need support below (or the arena floor plane) and a lateral neighbour. */
+    private static boolean stable(DropProbe probe, int x, int z, int y, Config config) {
+        if (!probe.isSolid(x, y - 1, z) && !isThinFloorColumn(probe, x, z, y, config.regionMinY())) return false;
+        return hasLateralSupport(probe, x, z, y);
+    }
+
+    /** A solid surface sitting exactly on the arena floor plane with no block supporting it from below. */
+    public static boolean isThinFloorColumn(DropProbe probe, int x, int z, int y, int regionMinY) {
+        return y == regionMinY && probe.isSolid(x, y, z) && !probe.isSolid(x, y - 1, z);
+    }
+
+    private static boolean hasLateralSupport(DropProbe probe, int x, int z, int y) {
+        return probe.isSolid(x - 1, y, z) || probe.isSolid(x + 1, y, z)
+                || probe.isSolid(x, y, z - 1) || probe.isSolid(x, y, z + 1);
+    }
+
+    /** True when any coarse-sampled column of the arena has a single-layer floor. */
+    public static boolean hasThinFloor(DropProbe probe, int minX, int maxX, int minZ, int maxZ,
+                                       int floorY, int step) {
+        step = Math.max(1, step);
+        for (int x = minX; x <= maxX; x += step) {
+            for (int z = minZ; z <= maxZ; z += step) {
+                if (isThinFloorColumn(probe, x, z, floorY, floorY)
+                        && hasLateralSupport(probe, x, z, floorY)) return true;
+            }
+        }
+        return false;
     }
 
     /**
