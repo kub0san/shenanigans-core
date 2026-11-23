@@ -1,39 +1,35 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
 import com.hizeric.shenaniganscore.ShenanigansCore;
-import com.hizeric.shenaniganscore.core.display.DisplayUtils;
-import com.hizeric.shenaniganscore.core.display.TransformUtils;
 import com.hizeric.shenaniganscore.core.sound.SoundUtils;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
-import org.bukkit.entity.ItemDisplay;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Thin Bukkit driver for the Rift Cleave dash-sword sequence.
  *
- * <p>All timing and geometry comes from {@link DashAnimation}; this class only turns frames into
- * displays, particles, sounds and a one-tick shake. Every display spawned here is tracked and
- * removed when the timeline ends, and all sounds are played at the player's location.</p>
+ * <p>All timing and geometry comes from {@link DashAnimation}; this class turns frames into
+ * particles, sounds, mannequin echoes and display-entity wind visuals. The dash follows a locked
+ * straight line — including downward — and the timeline ends early once that motion stops. Every
+ * spawned effect is owned by a helper and removed when the timeline ends.</p>
  */
 public final class DashSwordEffect {
 
     private static final double FORWARD_MOMENTUM = 2.6;
-    private static final double LIFT = 0.35;
-    private static final double MAX_UPWARD_MOMENTUM = 0.95;
 
-    private static final int SPEED_DURATION_TICKS = 60;
-    private static final int SPEED_AMPLIFIER = 1; // Speed II
+    /** A one-tick move this far can only be a teleport or a round reset, not a dash step. */
+    private static final double MAX_STEP = 8.0;
+    /** A stuck player keeps a large re-applied velocity while their position barely changes. */
+    private static final double STALL_DELTA = 0.05;
+    private static final int STALL_TICKS = 2;
 
     private DashSwordEffect() { }
 
@@ -50,60 +46,86 @@ public final class DashSwordEffect {
     }
 
     private static void applyMomentum(Player player, Vector direction) {
-        Vector momentum = direction.clone().multiply(FORWARD_MOMENTUM);
-        double upward = Math.min(Math.max(momentum.getY(), -0.3) + LIFT, MAX_UPWARD_MOMENTUM);
-        momentum.setY(upward);
-
-        player.setVelocity(momentum);
+        // No lift, no downward clamp: looking down dashes down. Re-applied every timeline tick.
+        player.setVelocity(direction.clone().multiply(FORWARD_MOMENTUM));
         player.setFallDistance(0.0f);
         player.setSprinting(true);
-        player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, SPEED_DURATION_TICKS,
-                SPEED_AMPLIFIER, true, false, false));
     }
 
-    /** One runnable drives both the launch and trail frames so timing cannot drift apart. */
+    /** One runnable drives launch, trail and teardown so timing cannot drift apart. */
     private static final class Timeline extends BukkitRunnable {
 
         private final Player player;
         private final Vector forward;
-        private final Vector right;
-        private final Vector up;
         private final Location origin;
+        private final Location echoOrigin;
+        private final World world;
+        private final GameMode launchGameMode;
+        private Location lastPosition;
+        private final float launchYaw;
+        private final float launchPitch;
         private final List<DashAnimation.Frame> launch = DashAnimation.launch();
         private final List<DashAnimation.Frame> trail = DashAnimation.trail();
-        private final List<ItemDisplay> displays = new ArrayList<>();
         private final MannequinEchoRenderer echoes;
         private final DashVisibilityMask visibility;
-        private final List<Ring> rings = new ArrayList<>();
+        private final WindTrailEffect wind;
 
-        private Vector shakeRestore;
         private int tick;
+        private int stallTicks;
+        private boolean airborneOnce;
+        private boolean windBurstLaunched;
         private boolean cleared;
 
         private Timeline(Player player, Vector forward) {
             this.player = player;
+            this.forward = forward.clone().normalize();
+            this.origin = player.getLocation().clone().add(0, 0.9, 0);
+            this.echoOrigin = this.origin.clone();
+            this.world = player.getWorld();
+            this.launchGameMode = player.getGameMode();
+            this.lastPosition = player.getLocation().clone();
+            this.launchYaw = player.getLocation().getYaw();
+            this.launchPitch = player.getLocation().getPitch();
             this.echoes = new MannequinEchoRenderer(player);
             this.visibility = new DashVisibilityMask(player);
-            this.forward = forward.clone().normalize();
-            this.right = DashAnimation.rightOf(this.forward);
-            this.up = this.right.clone().crossProduct(this.forward).normalize();
-            this.origin = player.getLocation().clone().add(0, 0.9, 0);
+            this.wind = new WindTrailEffect(player, origin, forward);
         }
 
         @Override
         public void run() {
-            if (tick > DashAnimation.TRAIL_TICKS || !player.isOnline() || player.isDead()) {
-                clear();
-                cancel();
+            if (tick > DashAnimation.TRAIL_TICKS || !player.isOnline() || player.isDead()
+                    || player.getWorld() != world || player.getGameMode() != launchGameMode) {
+                finish();
                 return;
             }
 
-            // A shake lasts exactly one tick: restore the velocity captured on the previous
-            // shake frame before doing anything else this tick.
-            if (shakeRestore != null) {
-                player.setVelocity(shakeRestore);
-                shakeRestore = null;
+            Location current = player.getLocation();
+            if (current.distanceSquared(lastPosition) > MAX_STEP * MAX_STEP) {
+                // Teleport, staging back to the hub or any other context jump ends the dash here.
+                finish();
+                return;
             }
+
+            boolean onGround = player.isOnGround();
+            if (onGround && airborneOnce) {
+                finish();
+                return;
+            }
+            if (!onGround) airborneOnce = true;
+
+            // Velocity is re-applied every tick, so a player stuck against a wall still carries a
+            // large velocity while their position barely changes. Stall detection reads position.
+            double moved = current.distance(lastPosition);
+            if (tick > 1 && moved < STALL_DELTA) stallTicks++;
+            else stallTicks = 0;
+            if (stallTicks >= STALL_TICKS) {
+                finish();
+                return;
+            }
+            lastPosition = current.clone();
+
+            // Gravity and knockback must not bend the locked path — including a downward dash.
+            player.setVelocity(forward.clone().multiply(FORWARD_MOMENTUM));
 
             DashAnimation.Frame launchFrame = launch.get(Math.min(tick, launch.size() - 1));
             DashAnimation.Frame trailFrame = trail.get(Math.min(tick, trail.size() - 1));
@@ -111,12 +133,11 @@ public final class DashSwordEffect {
             if (launchFrame.swing()) player.swingMainHand();
             for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn);
             for (DashAnimation.Sound sound : launchFrame.sounds()) play(sound);
-            if (launchFrame.shake()) shake();
 
             for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn);
             echoes.tick(tick);
             visibility.tick();
-            animateRings();
+            wind.tick(tick);
             tick++;
         }
 
@@ -132,15 +153,10 @@ public final class DashSwordEffect {
                         origin.clone().add(forward.clone().multiply(0.15 * tick)),
                         spawn.count(), 0.05, 0.05, 0.05, 0.01);
                 case WIND_CHARGE -> {
-                    // The verbatim launch phase emitted this cue but never spawned a display.
-                    for (int i = 0; i < spawn.count(); i++) {
-                        ItemDisplay display = DisplayUtils.spawnItem(
-                                ringPoint(origin, (Math.PI * 2.0 * i) / spawn.count(), 0.35),
-                                new ItemStack(Material.WIND_CHARGE), options());
-                        TransformUtils.applyTransform(display, spawn.scale(), spawn.scale(),
-                                spawn.scale(), 0f, 0f, 0f, 1);
-                        displays.add(display);
-                        rings.add(new Ring(display, tick, i, spawn.count(), spawn.scale()));
+                    // The beat fires on three frames, but the burst is a single launch cue.
+                    if (!windBurstLaunched) {
+                        wind.launchBurst(tick);
+                        windBurstLaunched = true;
                     }
                 }
                 case GHOST_ARC -> {
@@ -150,35 +166,14 @@ public final class DashSwordEffect {
         }
 
         private void spawnEchoes(DashAnimation.DisplaySpawn spawn) {
-            Location at = player.getLocation().clone().add(0, 0.9, 0);
-            Location behind = at.clone().subtract(forward.clone().multiply(0.4));
+            // The trail follows the locked launch line, not the live camera or a turned head.
+            Location point = echoOrigin.clone()
+                    .add(forward.clone().multiply(FORWARD_MOMENTUM * tick));
             for (int i = 0; i < spawn.count(); i++) {
-                // Straight-line streak: every echo sits just behind the caster along the dash
-                // direction, with no lateral offset — a motion trail, never flanking clones.
-                echoes.spawn(behind, at.getYaw(), at.getPitch(), tick);
-                player.getWorld().spawnParticle(Particle.CLOUD, behind, 2, 0.06, 0.06, 0.06, 0.01);
+                echoes.spawn(point, launchYaw, launchPitch, tick);
+                player.getWorld().spawnParticle(Particle.CLOUD, point, 2, 0.06, 0.06, 0.06, 0.01);
             }
-        }
-
-        private void animateRings() {
-            for (Ring ring : rings) {
-                int age = tick - ring.bornTick();
-                float scale = Math.max(0.02f, ring.baseScale() - age * 0.045f);
-                double radius = 0.35 + age * 0.14;
-                Location point = ringPoint(origin, (Math.PI * 2.0 * ring.index()) / ring.total(),
-                        radius).add(forward.clone().multiply(0.15));
-                ring.display().teleport(point);
-                TransformUtils.applyTransform(ring.display(), scale, scale, scale, 0f, 0f, 0f, 1);
-            }
-        }
-
-        private void shake() {
-            Vector velocity = player.getVelocity();
-            shakeRestore = velocity.clone();
-            Vector jitter = new Vector((Math.random() - 0.5) * 0.35,
-                    (Math.random() - 0.5) * 0.12,
-                    (Math.random() - 0.5) * 0.35);
-            player.setVelocity(velocity.add(jitter));
+            wind.trailStreak(point, tick);
         }
 
         private void play(DashAnimation.Sound cue) {
@@ -191,34 +186,17 @@ public final class DashSwordEffect {
             SoundUtils.play(player.getLocation(), sound, cue.volume(), cue.pitch());
         }
 
-        private Location ringPoint(Location center, double angle, double radius) {
-            return center.clone()
-                    .add(right.clone().multiply(Math.cos(angle) * radius))
-                    .add(up.clone().multiply(Math.sin(angle) * radius));
+        private void finish() {
+            clear();
+            cancel();
         }
 
         private void clear() {
             if (cleared) return;
             cleared = true;
-            for (ItemDisplay display : displays) remove(display);
-            displays.clear();
             echoes.close();
             visibility.restore();
-            rings.clear();
+            wind.close();
         }
-    }
-
-    private record Ring(ItemDisplay display, int bornTick, int index, int total, float baseScale) { }
-
-    private static DisplayUtils.Options options() {
-        return DisplayUtils.Options.builder()
-                .viewRange(8.0f)
-                .interpolation(0, 1)
-                .teleportDuration(1)
-                .build();
-    }
-
-    private static void remove(ItemDisplay display) {
-        if (display != null && display.isValid()) display.remove();
     }
 }
