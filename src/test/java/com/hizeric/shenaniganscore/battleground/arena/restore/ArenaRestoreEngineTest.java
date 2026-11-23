@@ -168,32 +168,98 @@ class ArenaRestoreEngineTest {
         assertEquals(100, engine.progressPercent());
     }
 
-    /** Important: deferred near-player cells stay pending and are written once the player leaves. */
+    /** Decision test: a stationary player standing on a cell must not defer it. */
     @Test
-    void deferredNearPlayerPositionsAreRetriedAndWritten() {
+    void stationaryPlayerOnCellStillGetsWritten() {
         Fixture fx = new Fixture();
         ArenaRestoreEngine engine = engine(fx, policy(2, false, false, true), SYNC, OK_LOADER, STONE);
-        long nearA = BlockKey.pack(1, 60, 1);
-        long nearB = BlockKey.pack(2, 60, 1);
-        long farA = BlockKey.pack(10, 60, 10);
-        long farB = BlockKey.pack(11, 60, 10);
-        Set<Long> all = set(nearA, nearB, farA, farB);
-        fx.players.add(new int[]{1, 1});
+        long underFeet = BlockKey.pack(1, 60, 1);
+        long beside = BlockKey.pack(2, 60, 1);
+        long far = BlockKey.pack(10, 60, 10);
+        Set<Long> all = set(underFeet, beside, far);
+        fx.players.add(new int[]{1, 1}); // stationary for every step
 
         assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
-        for (int i = 0; i < 3; i++) engine.restoreStep(null);
-
-        assertTrue(fx.writes.contains(farA));
-        assertTrue(fx.writes.contains(farB));
-        assertFalse(fx.writes.contains(nearA), "near-player cell must stay deferred");
-        assertFalse(fx.writes.contains(nearB), "near-player cell must stay deferred");
-
-        fx.players.clear();
         drive(engine);
+
         assertFalse(engine.isRestoring());
         assertFalse(engine.restoreFailed());
+        assertEquals(all, Set.copyOf(fx.writes), "no cell may stay deferred because a player stands still");
+        assertEquals(all.size(), fx.writes.size(), "no cell written twice");
+        assertEquals(100, engine.progressPercent(), "the bar reaches 100 while the player is stationary");
+    }
+
+    @Test
+    void multiplePlayersDoNotCreateAPendingSet() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, true), SYNC, OK_LOADER, STONE);
+        long underA = BlockKey.pack(1, 60, 1);
+        long underB = BlockKey.pack(10, 60, 10);
+        long underC = BlockKey.pack(2, 60, 1);
+        Set<Long> all = set(underA, underB, underC);
+        fx.players.add(new int[]{1, 1});
+        fx.players.add(new int[]{10, 10});
+        fx.players.add(new int[]{2, 1});
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
+        drive(engine);
+
+        assertFalse(engine.isRestoring());
+        assertEquals(all, Set.copyOf(fx.writes), "three players must not leave three pending cells");
+        assertEquals(100, engine.progressPercent());
+    }
+
+    @Test
+    void playerLeavingMidRestoreWritesFromTheFirstStep() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, true), SYNC, OK_LOADER, STONE);
+        Set<Long> all = set(BlockKey.pack(1, 60, 1), BlockKey.pack(2, 60, 1), BlockKey.pack(1, 60, 2));
+        fx.players.add(new int[]{1, 1}); // on the very first cell
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
+        engine.restoreStep(null);
+        assertEquals(1, fx.writes.size(), "the first step must write a cell under a stationary player");
+
+        fx.players.clear(); // player leaves the arena mid-restore
+        drive(engine);
+        assertFalse(engine.isRestoring());
         assertEquals(all, Set.copyOf(fx.writes));
-        assertEquals(all.size(), fx.writes.size());
+        assertEquals(100, engine.progressPercent());
+    }
+
+    @Test
+    void inFlightCellsAreDiscardedAcrossReload() {
+        Fixture fx = new Fixture();
+        List<CompletableFuture<Chunk>> futures = new ArrayList<>();
+        ArenaRestoreEngine.ChunkLoader holding = (world, cx, cz) -> {
+            CompletableFuture<Chunk> future = new CompletableFuture<>();
+            futures.add(future);
+            return future;
+        };
+        long oldCell = BlockKey.pack(1, 60, 1);
+        long newCell = BlockKey.pack(2, 60, 2);
+        fx.players.add(new int[]{1, 1});
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, true),
+                task -> fx.tasks.add(task), holding, STONE);
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(oldCell)), stoneChunks(15, 15)));
+        engine.restoreStep(null);
+        assertEquals(1, futures.size(), "the old generation has one in-flight load");
+
+        engine.cancel();                 // plugin disable / reload
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(newCell)), stoneChunks(15, 15)));
+        futures.get(0).complete(CHUNK);
+        while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+        assertFalse(fx.writes.contains(oldCell), "a stale deferred cell must never be written after reload");
+
+        engine.restoreStep(null);
+        assertEquals(2, futures.size(), "the new generation dispatches its own load");
+        futures.get(1).complete(CHUNK);
+        while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+
+        drive(engine);
+        assertFalse(engine.isRestoring());
+        assertEquals(Set.of(newCell), Set.copyOf(fx.writes));
     }
 
     /** Important: progress counts distinct ledger positions, never raw write count. */

@@ -286,23 +286,13 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         // One budget for the whole tick: dispatch, verification and writes all draw from it.
         callbackBudget = budget;
 
-        // Player positions are read once per tick, then reused for every deferral test.
-        Predicate<Long> deferred = null;
-        if (policy.deferNearPlayer()) {
-            List<int[]> players = deps.playerProbe().players(world);
-            if (players != null && !players.isEmpty()) {
-                deferred = packed -> ArenaChunkWork.nearPlayer(BlockKey.unpackX(packed),
-                        BlockKey.unpackZ(packed), players, ArenaChunkWork.DEFER_RADIUS_BLOCKS);
-            }
-        }
-
         int guard = queue.jobCount();
         while (!queue.jobsEmpty() && pendingLoads < MAX_IN_FLIGHT && guard-- > 0) {
             if (!budget.canStartChunk()
                     || !budget.canStartSections(ArenaChunkWork.SECTIONS_PER_CHUNK_CAP)) break;
 
-            Dispatch dispatch = queue.next(policy.blocksPerTick(), deferred);
-            if (dispatch == null) continue; // gated, or every cell deferred this tick
+            Dispatch dispatch = queue.next(policy.blocksPerTick(), null);
+            if (dispatch == null) continue; // gated this tick
 
             String ticketKey = ticketKey(world, dispatch.pos());
             deps.tickets().acquire(ticketKey);
