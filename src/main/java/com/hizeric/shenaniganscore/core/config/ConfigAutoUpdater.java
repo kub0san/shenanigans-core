@@ -155,7 +155,8 @@ private static final java.util.List<String> BATTLEGROUND_KEYS = java.util.List.o
             "combat.command-policy.mode",
             "combat.command-policy.allowed-roots",
             "combat.command-policy.blocked-roots",
-            "loadout.editable"
+            "loadout.editable",
+            "arena.restore.defer-near-player"
     );
 
     /** Live arena/round keys read by {@code ArenaRuntimeConfig}; never stripped from disk. */
@@ -170,7 +171,6 @@ private static final java.util.List<String> BATTLEGROUND_KEYS = java.util.List.o
             "arena.restore.ms-per-tick",
             "arena.restore.blocks-per-tick",
             "arena.restore.chunks-per-tick",
-            "arena.restore.defer-near-player",
             "arena.restore.animation.enabled",
             "arena.restore.animation.particles-per-chunk",
             "arena.restore.animation.sounds",

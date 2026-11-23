@@ -37,8 +37,6 @@ arena:
     ms-per-tick: 30
     blocks-per-tick: 256
     chunks-per-tick: 4
-    # Defer cells close to living players while restoring.
-    defer-near-player: true
     # Restore animation. Progress stays on the boss bar; the action bar is
     # opt-in because the technique HUD owns that single slot.
     animation:

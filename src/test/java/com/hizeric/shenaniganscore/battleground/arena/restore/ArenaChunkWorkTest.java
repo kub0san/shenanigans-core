@@ -112,7 +112,8 @@ class ArenaChunkWorkTest {
         assertTrue(policy.relight());
         assertTrue(policy.verify());
         assertTrue(policy.fallback());
-        assertTrue(policy.deferNearPlayer());
+        assertEquals(7, Policy.class.getRecordComponents().length,
+                "the defer policy component must be gone");
     }
 
     @Test
@@ -143,16 +144,6 @@ class ArenaChunkWorkTest {
         assertEquals("minecraft:stone", bulk.state());
         assertEquals("minecraft:water[level=1]", relight.state());
         assertEquals(BlockKey.pack(1, 61, 1), bulk.packed());
-    }
-
-    @Test
-    void nearPlayerDefersPlayersInsideSmallRadius() {
-        List<int[]> players = List.of(new int[]{10, 10});
-        assertTrue(ArenaChunkWork.nearPlayer(12, 10, players, 4.0));
-        assertTrue(ArenaChunkWork.nearPlayer(12, 10, players, 2.0), "boundary is inclusive");
-        assertFalse(ArenaChunkWork.nearPlayer(12, 10, players, 1.9));
-        assertFalse(ArenaChunkWork.nearPlayer(20, 10, players, 4.0));
-        assertFalse(ArenaChunkWork.nearPlayer(12, 10, List.of(), 4.0));
     }
 
     @Test

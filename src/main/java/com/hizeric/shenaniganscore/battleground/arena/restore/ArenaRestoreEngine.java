@@ -19,7 +19,6 @@ import org.bukkit.Chunk;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
-import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
 import java.nio.file.Path;
@@ -32,7 +31,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.LongSupplier;
-import java.util.function.Predicate;
 import java.util.logging.Logger;
 
 /**
@@ -49,7 +47,7 @@ import java.util.logging.Logger;
  * <ul>
  *   <li><b>Resumable verification.</b> A chunk is only called verified after every cell has been
  *       compared. Previously a scan cut short by the ms budget still counted as complete.</li>
- *   <li><b>Player positions are read once per tick</b>, not once per deferred-cell test.</li>
+ *   <li><b>Restore writes are never gated on player positions.</b></li>
  *   <li><b>Chunk tickets</b> parse their key from the right, so world names containing '/' work.</li>
  *   <li><b>capture()</b> no longer saves the snapshot twice.</li>
  *   <li><b>Animations</b> through {@link RestoreEffects}; they can never fail a restore.</li>
@@ -76,12 +74,11 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     interface ChunkLoader { CompletableFuture<Chunk> load(World world, int cx, int cz); }
     interface MainRunner { void run(Runnable task); }
     interface BlockWriter { void write(World world, long packed, String state, boolean physics); }
-    interface PlayerProbe { List<int[]> players(World world); }
     interface StateProbe { String at(World world, int x, int y, int z); }
     interface PolicySource { Policy get(); }
 
     record Deps(ChunkLoader loader, MainRunner runner, BlockWriter writer,
-                PlayerProbe playerProbe, StateProbe stateProbe, PolicySource policy,
+                StateProbe stateProbe, PolicySource policy,
                 TicketLedger<String> tickets, World forcedWorld) { }
 
     private final Plugin plugin;
@@ -154,7 +151,6 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                             BlockKey.unpackY(packed), BlockKey.unpackZ(packed));
                     block.setBlockData(data, physics);
                 },
-                ArenaRestoreEngine::playerPositions,
                 ArenaRestoreEngine::stateAt,
                 () -> Policy.from(ArenaRuntimeConfig.current()),
                 tickets,
@@ -286,23 +282,13 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         // One budget for the whole tick: dispatch, verification and writes all draw from it.
         callbackBudget = budget;
 
-        // Player positions are read once per tick, then reused for every deferral test.
-        Predicate<Long> deferred = null;
-        if (policy.deferNearPlayer()) {
-            List<int[]> players = deps.playerProbe().players(world);
-            if (players != null && !players.isEmpty()) {
-                deferred = packed -> ArenaChunkWork.nearPlayer(BlockKey.unpackX(packed),
-                        BlockKey.unpackZ(packed), players, ArenaChunkWork.DEFER_RADIUS_BLOCKS);
-            }
-        }
-
         int guard = queue.jobCount();
         while (!queue.jobsEmpty() && pendingLoads < MAX_IN_FLIGHT && guard-- > 0) {
             if (!budget.canStartChunk()
                     || !budget.canStartSections(ArenaChunkWork.SECTIONS_PER_CHUNK_CAP)) break;
 
-            Dispatch dispatch = queue.next(policy.blocksPerTick(), deferred);
-            if (dispatch == null) continue; // gated, or every cell deferred this tick
+            Dispatch dispatch = queue.next(policy.blocksPerTick());
+            if (dispatch == null) continue; // gated this tick
 
             String ticketKey = ticketKey(world, dispatch.pos());
             deps.tickets().acquire(ticketKey);
@@ -546,16 +532,6 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
 
         // finalSlice is per-job; markTierOneDone() enforces completion across all tier-1 chunks.
         if (dispatch.tierOne() && unwritten.isEmpty()) fireTierOneGate();
-    }
-
-    private static List<int[]> playerPositions(World world) {
-        List<int[]> positions = new ArrayList<>();
-        for (Player player : world.getPlayers()) {
-            if (player.isDead()) continue;
-            positions.add(new int[]{player.getLocation().getBlockX(),
-                    player.getLocation().getBlockZ()});
-        }
-        return positions;
     }
 
     /** Read-only, chunk-local state probe; never triggers a synchronous chunk load. */

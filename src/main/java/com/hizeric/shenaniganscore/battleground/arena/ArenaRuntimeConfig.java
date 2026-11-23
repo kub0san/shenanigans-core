@@ -44,7 +44,7 @@ public final class ArenaRuntimeConfig {
             1200, 15, true,
             true,
             true, true, true,
-            30, 256, 4, true,
+            30, 256, 4,
             true, 18, true, false);
 
     private static volatile ArenaRuntimeConfig current = EMPTY;
@@ -72,7 +72,6 @@ public final class ArenaRuntimeConfig {
     private final int restoreMsPerTick;
     private final int restoreBlocksPerTick;
     private final int restoreChunksPerTick;
-    private final boolean restoreDeferNearPlayer;
     private final boolean restoreAnimationEnabled;
     private final int restoreAnimationParticles;
     private final boolean restoreAnimationSounds;
@@ -82,7 +81,7 @@ public final class ArenaRuntimeConfig {
                                boolean protectionEnabled, boolean restoreRelight, boolean restoreVerify,
                                boolean restoreFallbackOnUnverified, int restoreMsPerTick,
                                int restoreBlocksPerTick, int restoreChunksPerTick,
-                               boolean restoreDeferNearPlayer, boolean restoreAnimationEnabled,
+                               boolean restoreAnimationEnabled,
                                int restoreAnimationParticles, boolean restoreAnimationSounds,
                                boolean restoreAnimationActionBar) {
         this.roundDurationSeconds = roundDurationSeconds;
@@ -95,7 +94,6 @@ public final class ArenaRuntimeConfig {
         this.restoreMsPerTick = restoreMsPerTick;
         this.restoreBlocksPerTick = restoreBlocksPerTick;
         this.restoreChunksPerTick = restoreChunksPerTick;
-        this.restoreDeferNearPlayer = restoreDeferNearPlayer;
         this.restoreAnimationEnabled = restoreAnimationEnabled;
         this.restoreAnimationParticles = restoreAnimationParticles;
         this.restoreAnimationSounds = restoreAnimationSounds;
@@ -122,7 +120,6 @@ public final class ArenaRuntimeConfig {
     public int restoreMsPerTick() { return restoreMsPerTick; }
     public int restoreBlocksPerTick() { return restoreBlocksPerTick; }
     public int restoreChunksPerTick() { return restoreChunksPerTick; }
-    public boolean restoreDeferNearPlayer() { return restoreDeferNearPlayer; }
     public boolean restoreAnimationEnabled() { return restoreAnimationEnabled; }
     public int restoreAnimationParticles() { return restoreAnimationParticles; }
     public boolean restoreAnimationSounds() { return restoreAnimationSounds; }
@@ -171,8 +168,6 @@ public final class ArenaRuntimeConfig {
                                 d.restoreBlocksPerTick, BLOCKS_MIN, BLOCKS_MAX),
                         reader.number(restore.node("chunks-per-tick"), "arena.restore.chunks-per-tick",
                                 d.restoreChunksPerTick, CHUNKS_MIN, CHUNKS_MAX),
-                        reader.flag(restore.node("defer-near-player"), "arena.restore.defer-near-player",
-                                d.restoreDeferNearPlayer),
                         reader.optionalFlag(animation.node("enabled"), "arena.restore.animation.enabled",
                                 d.restoreAnimationEnabled),
                         reader.optionalNumber(animation.node("particles-per-chunk"),

@@ -89,9 +89,8 @@ class ArenaVerificationTest {
                 (world, cx, cz) -> CompletableFuture.completedFuture(FAKE_CHUNK),
                 task -> task.run(),
                 (world, packed, state, physics) -> writes.add(packed),
-                world -> List.of(),
                 (world, x, y, z) -> "minecraft:stone",
-                () -> new Policy(100_000, 1, 4, 8, false, verify, false, false),
+                () -> new Policy(100_000, 1, 4, 8, false, verify, false),
                 new TicketLedger<>(key -> { }, key -> { }),
                 WORLD);
         return new ArenaRestoreEngine(deps, Logger.getLogger("ArenaVerificationTest"), null,

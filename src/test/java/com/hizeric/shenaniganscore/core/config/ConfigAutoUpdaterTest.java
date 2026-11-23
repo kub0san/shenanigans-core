@@ -73,4 +73,19 @@ class ConfigAutoUpdaterTest {
         assertEquals(marker, Files.readString(shim.toPath()));
         assertFalse(new File(shim.getPath() + ".backup").exists());
     }
+
+    @Test
+    void deferNearPlayerKeyIsStrippedFromExistingConfig() throws Exception {
+        File bg = new File(folder.toFile(), "battleground/config.yml");
+        Files.createDirectories(bg.toPath().getParent());
+        Files.writeString(bg.toPath(),
+                "config-version: 0\narena:\n  restore:\n    defer-near-player: true\n    blocks-per-tick: 777\n");
+
+        assertEquals(2, updater().run());
+
+        String after = Files.readString(bg.toPath());
+        assertFalse(after.contains("defer-near-player"), "the retired key must be stripped from disk");
+        assertTrue(after.contains("blocks-per-tick: 777"), "a live restore key must survive the merge");
+        assertTrue(after.contains("config-version: 1"));
+    }
 }
