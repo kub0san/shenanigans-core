@@ -1,4 +1,4 @@
-package com.hizeric.shenaniganscore.battleground.ability;
+package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;

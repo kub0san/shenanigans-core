@@ -1,5 +1,6 @@
-package com.hizeric.shenaniganscore.battleground.item;
+package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
+import com.hizeric.shenaniganscore.battleground.item.BattlegroundItemKeys;
 import com.hizeric.shenaniganscore.battleground.shop.ShopEntry;
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;

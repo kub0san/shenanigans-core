@@ -1,4 +1,4 @@
-package com.hizeric.shenaniganscore.battleground.item;
+package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
 /**
  * The canonical id of the Dash Sword custom item and the one-time migration from its legacy id.

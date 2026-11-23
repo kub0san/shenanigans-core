@@ -2,7 +2,6 @@ package com.hizeric.shenaniganscore;
 
 import com.hizeric.shenaniganscore.battleground.BattlegroundListener;
 import com.hizeric.shenaniganscore.battleground.BattlegroundManager;
-import com.hizeric.shenaniganscore.battleground.ability.DashSwordAbility;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaProtection;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaEntryGuard;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRuntimeConfig;
@@ -49,6 +48,7 @@ import com.hizeric.shenaniganscore.battleground.player.lifecycle.PlayerLifecycle
 import com.hizeric.shenaniganscore.listeners.MovementListener;
 import com.hizeric.shenaniganscore.listeners.OverlayListener;
 import com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities;
+import com.hizeric.shenaniganscore.origins.minecraft.MinecraftAbilities;
 import com.hizeric.shenaniganscore.resourcepack.ResourcePackManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.Bukkit;
@@ -193,7 +193,7 @@ public final class ShenanigansCore extends JavaPlugin {
         this.abilityRegistry = new AbilityRegistry(message -> getLogger().warning(message));
         this.abilityCaster = new AbilityCaster(abilityRegistry, cooldownManager);
         JujutsuAbilities.register(abilityRegistry);
-        abilityRegistry.register(DashSwordAbility.definition());
+        MinecraftAbilities.register(abilityRegistry);
         getLogger().info("Registered " + abilityRegistry.size() + " abilities.");
 
         this.battlegroundManager = new BattlegroundManager(this);

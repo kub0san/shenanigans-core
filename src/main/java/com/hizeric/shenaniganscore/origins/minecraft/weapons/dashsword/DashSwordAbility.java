@@ -1,7 +1,6 @@
-package com.hizeric.shenaniganscore.battleground.ability;
+package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
 import com.hizeric.shenaniganscore.ShenanigansCore;
-import com.hizeric.shenaniganscore.battleground.item.DashSwordItem;
 import com.hizeric.shenaniganscore.core.ability.AbilityDefinition;
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
 import net.kyori.adventure.text.minimessage.MiniMessage;

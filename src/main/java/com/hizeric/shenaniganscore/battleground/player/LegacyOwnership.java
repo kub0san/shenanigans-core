@@ -1,7 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.player;
 
 import com.hizeric.shenaniganscore.battleground.ability.AbilityIdMigration;
-import com.hizeric.shenaniganscore.battleground.item.DashSwordId;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordId;
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
 
 public final class LegacyOwnership {

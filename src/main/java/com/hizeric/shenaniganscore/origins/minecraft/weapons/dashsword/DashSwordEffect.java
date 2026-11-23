@@ -1,4 +1,4 @@
-package com.hizeric.shenaniganscore.battleground.ability;
+package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.display.DisplayUtils;

@@ -2,8 +2,8 @@ package com.hizeric.shenaniganscore.battleground.shop;
 
 import com.hizeric.shenaniganscore.battleground.ability.AbilityIdMigration;
 import com.hizeric.shenaniganscore.battleground.item.BattlegroundItemKeys;
-import com.hizeric.shenaniganscore.battleground.item.DashSwordId;
-import com.hizeric.shenaniganscore.battleground.item.DashSwordItem;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordId;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordItem;
 import com.hizeric.shenaniganscore.battleground.storage.Databases;
 import com.hizeric.shenaniganscore.battleground.storage.Database;
 import com.hizeric.shenaniganscore.battleground.storage.ShopRepository;
