@@ -73,15 +73,17 @@ public final class DashSwordEffect {
         private final List<DashAnimation.Frame> trail = DashAnimation.trail();
         private final List<ItemDisplay> displays = new ArrayList<>();
         private final MannequinEchoRenderer echoes;
+        private final DashVisibilityMask visibility;
         private final List<Ring> rings = new ArrayList<>();
-        private int echoIndex;
 
         private Vector shakeRestore;
         private int tick;
+        private boolean cleared;
 
         private Timeline(Player player, Vector forward) {
             this.player = player;
             this.echoes = new MannequinEchoRenderer(player);
+            this.visibility = new DashVisibilityMask(player);
             this.forward = forward.clone().normalize();
             this.right = DashAnimation.rightOf(this.forward);
             this.up = this.right.clone().crossProduct(this.forward).normalize();
@@ -113,6 +115,7 @@ public final class DashSwordEffect {
 
             for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn);
             echoes.tick(tick);
+            visibility.tick();
             animateRings();
             tick++;
         }
@@ -150,12 +153,10 @@ public final class DashSwordEffect {
             Location at = player.getLocation().clone().add(0, 0.9, 0);
             Location behind = at.clone().subtract(forward.clone().multiply(0.4));
             for (int i = 0; i < spawn.count(); i++) {
-                // One echo per beat, dropped just behind the caster with an alternating lateral
-                // offset — an afterimage trail, never a ring of floating weapons.
-                double offset = (echoIndex++ % 2 == 0 ? 1.0 : -1.0)
-                        * DashAnimation.GHOST_ARC_RADIUS;
-                Location point = behind.clone().add(right.clone().multiply(offset));
-                echoes.spawn(point, at.getYaw(), at.getPitch(), tick);
+                // Straight-line streak: every echo sits just behind the caster along the dash
+                // direction, with no lateral offset — a motion trail, never flanking clones.
+                echoes.spawn(behind, at.getYaw(), at.getPitch(), tick);
+                player.getWorld().spawnParticle(Particle.CLOUD, behind, 2, 0.06, 0.06, 0.06, 0.01);
             }
         }
 
@@ -197,9 +198,12 @@ public final class DashSwordEffect {
         }
 
         private void clear() {
+            if (cleared) return;
+            cleared = true;
             for (ItemDisplay display : displays) remove(display);
             displays.clear();
             echoes.close();
+            visibility.restore();
             rings.clear();
         }
     }

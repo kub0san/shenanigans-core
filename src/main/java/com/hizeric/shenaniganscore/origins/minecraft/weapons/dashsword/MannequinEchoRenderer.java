@@ -39,7 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Packet-only mannequin afterimages for the Rift Cleave dash trail.
  *
  * <p>Each dash owns one renderer. It spawns {@code minecraft:mannequin} entities with the caster's
- * live skin, makes them invisible + glowing so only a cyan outline renders (no translucent body),
+ * live skin, makes them invisible + glowing so only a white outline renders (no translucent body),
  * and drives {@code minecraft:scale} down with {@link DashAnimation#ghostScale(int)} until the echo
  * ages out. Nothing here touches Bukkit display entities or the player's real profile.</p>
  *
@@ -58,7 +58,7 @@ public final class MannequinEchoRenderer {
                     Component.empty(), Component.empty(), Component.empty(),
                     WrapperPlayServerTeams.NameTagVisibility.NEVER,
                     WrapperPlayServerTeams.CollisionRule.NEVER,
-                    NamedTextColor.AQUA,
+                    NamedTextColor.WHITE,
                     WrapperPlayServerTeams.OptionData.NONE);
 
     private final Player caster;

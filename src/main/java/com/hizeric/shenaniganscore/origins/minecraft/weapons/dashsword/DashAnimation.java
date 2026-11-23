@@ -16,7 +16,7 @@ public final class DashAnimation {
 
     public static final int TRAIL_TICKS = 28;
     public static final int GHOST_COUNT = 1;
-    public static final int GHOST_LIFE = 18;
+    public static final int GHOST_LIFE = 12;
     public static final double GHOST_ARC_RADIUS = 1.4;
 
     private static final Vector UP = new Vector(0, 1, 0);
@@ -50,7 +50,7 @@ public final class DashAnimation {
     private static final Map<Kind, Beat> BEATS = Map.of(
             Kind.CLEAVE_BURST, new Beat(Kind.CLEAVE_BURST, 0, 2, 1),
             Kind.RIFT_RIBBON, new Beat(Kind.RIFT_RIBBON, 1, 14, 1),
-            Kind.GHOST_ARC, new Beat(Kind.GHOST_ARC, 2, 20, 2),
+            Kind.GHOST_ARC, new Beat(Kind.GHOST_ARC, 1, 18, 1),
             Kind.WIND_CHARGE, new Beat(Kind.WIND_CHARGE, 0, 6, 3));
 
     private static final List<Sound> SOUNDS = List.of(
