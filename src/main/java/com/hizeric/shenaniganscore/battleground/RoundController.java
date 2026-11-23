@@ -218,13 +218,15 @@ final class RoundController {
         m.economy.rollNewRound();
 
         flushDiffLedger(m.arenaStore.activeMapId());
-        if (startTieredRestore(m.arenaStore.activeMapId(),
-                readDiffLog(m.arenaStore.activeMapId()), false)) {
+        DiffLog.Decoded diff = readDiffLog(m.arenaStore.activeMapId());
+        if (startTieredRestore(m.arenaStore.activeMapId(), diff, false)) {
             m.announce("<gray>Restoring arena… <white>Shop is open.");
             return;
         }
-        // No tiered restore available: fall back to a safe ready state.
-        completeRestoreAndOpenRound(false);
+        // No tiered restore ran: only an absent log or an empty, flushed diff is clean. Recorded
+        // positions or an incomplete ledger are unrestored work and must not be announced as ready.
+        boolean dirty = diff != null && (!diff.complete() || !diff.positions().isEmpty());
+        completeRestoreAndOpenRound(dirty);
     }
 
     /**
@@ -297,11 +299,11 @@ final class RoundController {
         m.state = RoundState.STAGING;
         boolean started = m.restoreEngine.beginRestore(region, mapId, safeDiff, snapshot);
         if (started) {
-            // Tier 1 still pending: RESTORING is the live state that disables Deploy in the hub.
-            // The tier-1 callback is status-only (issue #7): even a synchronous empty-diff gate
-            // leaves us in STAGING until the full restore completes, and deploy stays closed
-            // because RoundGates.deploy maps STAGING to RESTORING.
-            if (!tierOneGateConsumed.consumed()) m.state = RoundState.RESTORING;
+            // Tier 2 is in flight whenever beginRestore succeeded, so RESTORING is always the live
+            // state that disables Deploy in the hub. The tier-1 callback is status-only (issue #7):
+            // a synchronous empty-diff gate consumes its one-shot without moving the round to
+            // RUNNING, and joining players must hear about the verification and block writes.
+            m.state = RoundState.RESTORING;
             startRestoreTask();
         }
         return started;
@@ -527,7 +529,7 @@ final class RoundController {
             }
             m.plugin.getLogger().warning("Arena recovery could not start for map '" + mapId
                     + "'; starting a fresh round without auto-capture.");
-            completeRestoreAndOpenRound(false);
+            completeRestoreAndOpenRound(true);
             return;
         }
         beginReset();

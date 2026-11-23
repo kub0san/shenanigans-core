@@ -89,11 +89,14 @@ class AdminRoundGateTest {
         AdminRoundGate.Result inFlight = AdminRoundGate.decide(
                 AdminRoundGate.Action.START, RoundState.IDLE, true, true, 0);
         assertFalse(inFlight.allowed());
+        assertEquals(AdminRoundGate.Effect.NONE, inFlight.effect(),
+                "a denied force-start must report no executed effect");
         assertTrue(inFlight.message().contains("restoring"));
 
         AdminRoundGate.Result ready = AdminRoundGate.decide(
                 AdminRoundGate.Action.START, RoundState.IDLE, true, false, 0);
         assertTrue(ready.allowed());
+        assertEquals(AdminRoundGate.Effect.START, ready.effect());
 
         AdminRoundGate.Result restoringState = AdminRoundGate.decide(
                 AdminRoundGate.Action.START, RoundState.RESTORING, true, false, 0);

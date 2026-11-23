@@ -45,8 +45,7 @@ class RoundGatesTest {
         // restoring round blocks deploy without a separate boolean.
         // Issue #7: these are the full-restore gate's state contracts. Deploy stays closed
         // through tier 2: RESTORING and STAGING (tier-1 status only, full restore still running)
-        // both map to RESTORING below. Only a running-like round (RUNNING/WARNING) is READY;
-        // IDLE is READY too because an IDLE deploy runs the round-start invariants itself.
+        // both map to RESTORING below. RUNNING/WARNING and IDLE are READY; RESTORING/STAGING are not.
         assertEquals(RoundGates.Deploy.RESTORING,
                 RoundGates.deploy(RoundState.RESTORING, true, false));
         // STAGING: tier-1 gate is open, deployment closed until RUNNING.

@@ -22,6 +22,8 @@ class RoundReadinessTest {
         readiness.onTierOneDone();
         assertEquals(RoundReadiness.Outcome.OPEN_CLEAN, readiness.onRestoreFinished(false));
         assertTrue(readiness.opened(), "only the full restore opens deploy");
+        assertTrue(readiness.tierOneSeen(),
+                "the full restore also consumes the tier-1 one-shot so a late gate cannot re-announce");
         assertEquals("<green>Round <white>4<green> is ready — deploy with /battleground join",
                 RoundReadiness.announcement(4, false));
     }

@@ -90,8 +90,31 @@ class RoundReadinessWiringTest {
         String controller = source(CONTROLLER);
         assertTrue(count(controller, "readiness.reset()") >= 2,
                 "beginReset() and restoreOnEnableIfNeeded() must arm a fresh readiness generation");
-        assertTrue(count(controller, "completeRestoreAndOpenRound(false)") >= 2,
-                "both no-tiered-restore fallbacks open through the same gate");
+        String reset = block(controller, "void beginReset()",
+                "private static Location evacuationDestination(");
+        assertTrue(reset.contains("completeRestoreAndOpenRound(dirty)"),
+                "the no-restore fallback must carry the recorded diff's dirty state, never claim a clean ready");
+        assertFalse(reset.contains("completeRestoreAndOpenRound(false)"),
+                "a skip with recorded unrestored work must not announce a clean ready");
+        String recovery = block(controller, "void restoreOnEnableIfNeeded()", "void reloadConfig()");
+        assertTrue(recovery.contains("completeRestoreAndOpenRound(true)"),
+                "an unflushed recovery that cannot start opens dirty by definition");
+        assertFalse(recovery.contains("completeRestoreAndOpenRound(false)"),
+                "an unflushed recovery must not announce a clean ready");
+    }
+
+    @Test
+    void synchronousEmptyDiffStaysRestoringDuringTierTwo() throws IOException {
+        String restore = block(source(CONTROLLER), "private boolean startTieredRestore(",
+                "void onTierOneGateOpen()");
+        assertTrue(restore.contains("m.state = RoundState.STAGING;")
+                        && restore.indexOf("m.state = RoundState.STAGING;")
+                        < restore.indexOf("boolean started = m.restoreEngine.beginRestore("),
+                "STAGING must be live before beginRestore so a synchronous tier-1 gate sees a staged round");
+        assertTrue(restore.contains("m.state = RoundState.RESTORING;"),
+                "a successful beginRestore always leaves tier 2 in flight, even when tier 1 fired synchronously");
+        assertFalse(restore.contains("!tierOneGateConsumed.consumed()"),
+                "the tier-1 one-shot must not gate the RESTORING state: tier 1 is status-only now");
     }
 
     @Test
