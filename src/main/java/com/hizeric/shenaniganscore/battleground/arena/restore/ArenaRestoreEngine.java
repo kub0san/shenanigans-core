@@ -385,6 +385,10 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     @Override
     public boolean restoreFailed() { return queue.failed(); }
 
+    /**
+     * Verification-aware progress accounting is owned by issue #3. Do not add a competing metric
+     * here; this method intentionally keeps its written-ledger semantics until #3 lands.
+     */
     @Override
     public int progressPercent() {
         if (phase == Phase.DONE && !queue.failed()) return 100;
