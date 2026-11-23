@@ -1,14 +1,23 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword;
 
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
-import org.bukkit.Material;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+
+import java.io.File;
+import java.net.URL;
+import java.util.logging.Logger;
 
 import static com.hizeric.shenaniganscore.core.config.AbilityTuningConfig.Section.ITEMS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class ExecutionerDefaultsTest {
+
+    @AfterEach
+    void restoreDefaults() {
+        AbilityTuningConfig.load(null, null);
+    }
 
     @Test
     void cooldownDefaultIsNinety() {
@@ -36,7 +45,12 @@ class ExecutionerDefaultsTest {
     }
 
     @Test
-    void cooldownReadsShippedDefaultWhenNoConfig() {
-        assertEquals(90, AbilityTuningConfig.defaults().cooldown(ITEMS, "executioner-sword", 90));
+    void cooldownReadsShippedValueFromConfig() throws Exception {
+        URL url = ExecutionerDefaultsTest.class.getResource("/config.yml");
+        assertNotNull(url);
+        AbilityTuningConfig.load(new File(url.toURI()), Logger.getLogger("test"));
+        // Fallback (7) differs from the shipped value (90) to prove the shipped value is read.
+        assertEquals(90, AbilityTuningConfig.current().cooldown(ITEMS, "executioner-sword", 7));
+        assertEquals(90, ExecutionerSwordItem.cooldownSeconds());
     }
 }

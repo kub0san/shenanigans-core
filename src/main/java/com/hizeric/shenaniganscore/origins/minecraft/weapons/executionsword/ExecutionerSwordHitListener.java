@@ -1,6 +1,5 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword;
 
-import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.sound.SoundUtils;
 import org.bukkit.Sound;
 import org.bukkit.entity.Entity;
@@ -16,8 +15,6 @@ import org.bukkit.inventory.ItemStack;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 /**
  * Arms the next landed Executioner's Sword hit and dispatches the variant (uppercut vs
@@ -30,16 +27,9 @@ public final class ExecutionerSwordHitListener implements Listener {
 
     public static final long ARM_DURATION_MS = ExecutionerSwordItem.ARM_DURATION_MS;
 
-    private final ShenanigansCore plugin;
     private final Map<UUID, Long> armedUntil = new ConcurrentHashMap<>();
 
-    public ExecutionerSwordHitListener(ShenanigansCore plugin) {
-        this.plugin = plugin;
-    }
-
-    ExecutionerSwordHitListener(Supplier<ShenanigansCore> pluginSupplier, Predicate<UUID> deployed) {
-        this.plugin = pluginSupplier.get();
-        // deployed predicate intentionally unused: variants apply whenever armed
+    public ExecutionerSwordHitListener() {
     }
 
     public void arm(Player player) {
@@ -50,7 +40,7 @@ public final class ExecutionerSwordHitListener implements Listener {
     public boolean isArmed(Player player) {
         Long expiry = armedUntil.get(player.getUniqueId());
         if (expiry == null) return false;
-        if (System.currentTimeMillis() > expiry) {
+        if (System.currentTimeMillis() >= expiry) {
             armedUntil.remove(player.getUniqueId());
             return false;
         }
@@ -65,9 +55,10 @@ public final class ExecutionerSwordHitListener implements Listener {
         if (!ExecutionerSwordItem.isExecutionerSword(weapon)) return;
         if (!isArmed(attacker)) return;
 
-        armedUntil.remove(attacker.getUniqueId());
-
         Entity target = event.getEntity();
+        if (!(target instanceof LivingEntity living)) return;
+
+        armedUntil.remove(attacker.getUniqueId());
         event.setCancelled(true);
         if (target instanceof Player pTarget) {
             if (pTarget.getHealth() <= ExecutionerSwordItem.EXECUTE_THRESHOLD) {
@@ -75,7 +66,7 @@ public final class ExecutionerSwordHitListener implements Listener {
             } else {
                 ExecutionerSwordEffect.uppercut(attacker, pTarget);
             }
-        } else if (target instanceof LivingEntity living) {
+        } else {
             ExecutionerSwordEffect.uppercut(attacker, living);
         }
     }

@@ -45,13 +45,11 @@ public final class ExecutionerSwordEffect {
         if (caster == null || target == null || plugin == null) return;
 
         // Cleave-style i-frame reset.
-        Vector savedVelocity = target.getVelocity().clone();
         target.setNoDamageTicks(0);
-        target.damage(12.0, caster);
-        target.setVelocity(savedVelocity);
-        target.setVelocity(new Vector(0, 0.55, 0));
-
         SoundUtils.play(target.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.0f, 1.0f);
+        target.damage(12.0, caster);
+        target.setVelocity(new Vector(0, 0.55, 0));
+        // Launch sound plays at the launch moment, not the hit tick.
         SoundUtils.play(target.getLocation(), Sound.BLOCK_ANVIL_LAND, 0.35f, 0.6f);
 
         new UppercutTimeline(plugin, caster, target).runTaskTimer(plugin, 0L, 1L);
@@ -67,8 +65,9 @@ public final class ExecutionerSwordEffect {
         int savedNoDamageTicks = target.getNoDamageTicks();
 
         target.setNoDamageTicks(0);
-        if (target.getHealth() > 1.0) {
-            target.damage(0.5, caster);
+        if (target.getHealth() > 0.5) {
+            double mark = Math.min(0.5, target.getHealth() - 0.1);
+            target.damage(mark, caster);
         }
         target.setNoDamageTicks(100);
 
@@ -452,6 +451,15 @@ public final class ExecutionerSwordEffect {
 
         private void animateGhosts() {
             double r = ghostRadius(tick);
+            float sc;
+            if (tick < 20) {
+                sc = 2.5f;
+            } else {
+                float fade = 1.0f - (tick - 20) / 4.0f;
+                if (fade < 0.01f) fade = 0.01f;
+                sc = 2.5f * fade;
+                if (sc < 0.01f) sc = 0.01f;
+            }
             for (int i = 0; i < ghosts.size(); i++) {
                 ItemDisplay id = ghosts.get(i);
                 if (id == null || !id.isValid()) continue;
@@ -459,7 +467,7 @@ public final class ExecutionerSwordEffect {
                 double angle = base + tick * 0.3;
                 Location loc = anchor.clone().add(Math.cos(angle) * r, 1.0, Math.sin(angle) * r);
                 id.teleport(loc);
-                TransformUtils.applyTransform(id, 2.5f, 2.5f, 2.5f, 0f, 0f, 0f, 1);
+                TransformUtils.applyTransform(id, sc, sc, sc, 0f, 0f, 0f, 1);
             }
         }
 
@@ -468,8 +476,17 @@ public final class ExecutionerSwordEffect {
             double y = guillotineY(tick);
             Location loc = anchor.clone().add(0, y, 0);
             guillotine.teleport(loc);
+            float sc;
+            if (tick < 20) {
+                sc = 3.0f;
+            } else {
+                float fade = 1.0f - (tick - 20) / 4.0f;
+                if (fade < 0.01f) fade = 0.01f;
+                sc = 3.0f * fade;
+                if (sc < 0.01f) sc = 0.01f;
+            }
             TransformUtils.applyFacing(guillotine,
-                    new Vector3f(3.0f, 3.0f, 3.0f),
+                    new Vector3f(sc, sc, sc),
                     new Vector3f(0.0f, -1.0f, 0.0f),
                     new Vector3f(0.5f, 0.5f, 0.5f), 1);
         }

@@ -22,7 +22,7 @@ public final class MinecraftAbilities {
         registry.register(DashSwordAbility.definition());
         plugin.getServer().getPluginManager().registerEvents(new DashSwordHitListener(plugin), plugin);
 
-        ExecutionerSwordHitListener listener = new ExecutionerSwordHitListener(plugin);
+        ExecutionerSwordHitListener listener = new ExecutionerSwordHitListener();
         registry.register(ExecutionerSwordAbility.definition(listener));
         plugin.getServer().getPluginManager().registerEvents(listener, plugin);
     }
