@@ -382,7 +382,9 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     @Override
     public int progressPercent() {
         if (phase == Phase.DONE && !queue.failed()) return 100;
-        return queue.progressPercent(totalPositions, diff == null ? Set.of() : diff.positions());
+        Set<Long> ledger = diff == null ? Set.of() : diff.positions();
+        if (ledger.isEmpty()) return queue.progressPercentByWork(pendingLoads);
+        return queue.progressPercent(totalPositions, ledger);
     }
 
     /** Visible to Task 8 so it can open deployment as soon as the gate completes. */

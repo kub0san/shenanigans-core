@@ -196,6 +196,10 @@ class ArenaRestoreEngineTest {
         return new DiffLog.Decoded("ffa", 1L, true, positions, null);
     }
 
+    private static DiffLog.Decoded unflushedEmptyDiff() {
+        return new DiffLog.Decoded("ffa", 2L, false, Set.of(), "unflushed round");
+    }
+
     private static Policy policy(int blocksPerTick, boolean verify, boolean fallback) {
         return new Policy(100_000, blocksPerTick, 4, 8, false, verify, fallback);
     }
@@ -747,5 +751,74 @@ class ArenaRestoreEngineTest {
         assertFalse(engine.isRestoring());
         assertEquals(Set.of(first, second), Set.copyOf(fx.writes));
         assertEquals(4, fx.writes.size(), "each cell is written bulk then relight");
+    }
+
+    /** An empty ledger must report work-share progress instead of freezing at 0%. */
+    @Test void emptyUnflushedLedgerProgressAdvancesInsteadOfStayingAtZero() {
+        Fixture fx = new Fixture();
+        Policy oneChunk = new Policy(100_000, 256, 1, 2, false, true, false);
+        ArenaRestoreEngine engine = engine(fx, oneChunk, SYNC, OK_LOADER, STONE);
+        assertTrue(engine.beginRestore(region(), "ffa", unflushedEmptyDiff(),
+                stoneChunks(60, 60, 31, 15))); // two snapshot chunks
+        assertEquals(0, engine.progressPercent());
+        engine.restoreStep(null);
+        assertEquals(50, engine.progressPercent(), "one of two verification chunks is done");
+        drive(engine);
+        assertFalse(engine.isRestoring());
+        assertEquals(100, engine.progressPercent());
+    }
+
+    /** The reported symptom is the boss bar, so assert the cosmetic layer sees increasing percents. */
+    @Test void bossBarProgressLayerReceivesIncreasingPercentsForEmptyLedger() {
+        Fixture fx = new Fixture();
+        List<Integer> seen = new ArrayList<>();
+        Policy oneChunk = new Policy(100_000, 256, 1, 2, false, true, false);
+        ArenaRestoreEngine engine = engine(fx, oneChunk, SYNC, OK_LOADER, STONE);
+        engine.effects(new RestoreEffects() {
+            @Override public void onProgress(World world, int percent) { seen.add(percent); }
+        });
+        assertTrue(engine.beginRestore(region(), "ffa", unflushedEmptyDiff(),
+                stoneChunks(60, 60, 79, 79))); // 25 chunks -> effects fire at steps 10 and 20
+        drive(engine);
+        assertTrue(seen.size() >= 2, "effects must fire more than once, was " + seen);
+        assertTrue(seen.get(0) > 0, "the bar must never be driven to a hard 0%, was " + seen);
+        assertTrue(seen.get(1) > seen.get(0), "reported progress must increase, was " + seen);
+        assertEquals(100, engine.progressPercent());
+    }
+
+    /** A failed empty-ledger restore must never cap out at 100%. */
+    @Test void emptyLedgerFailedRestoreNeverReportsComplete() {
+        Fixture fx = new Fixture();
+        int[] loads = {0};
+        ArenaRestoreEngine.ChunkLoader failingFirst = (w, cx, cz) -> {
+            if (loads[0]++ == 0) throw new IllegalStateException("load failed");
+            return CompletableFuture.completedFuture(CHUNK);
+        };
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, false), SYNC, failingFirst, STONE);
+        assertTrue(engine.beginRestore(region(), "ffa", unflushedEmptyDiff(),
+                stoneChunks(60, 61, 15, 15)));
+        assertTrue(engine.restoreStep(null));
+        assertTrue(engine.restoreFailed());
+        assertTrue(engine.progressPercent() < 100, "a failed empty-ledger restore must never show 100%");
+    }
+
+    /** Non-empty ledgers keep the distinct-position formula; fallback writes cannot inflate it. */
+    @Test void nonEmptyLedgerIgnoresWorkAccountingAndFallbackWrites() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine.StateProbe unlogged = (w, x, y, z) ->
+                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER, unlogged);
+        Set<Long> ledger = set(BlockKey.pack(2, 60, 1), BlockKey.pack(4, 60, 1),
+                BlockKey.pack(5, 60, 1), BlockKey.pack(7, 60, 1));
+        assertTrue(engine.beginRestore(region(), "ffa", diff(ledger),
+                stoneChunks(60, 61, 15, 15)));
+        for (int i = 0; i < 100 && engine.isRestoring(); i++) {
+            engine.restoreStep(null);
+            long distinct = fx.writes.stream().filter(ledger::contains).distinct().count();
+            assertEquals((int) Math.min(100L, distinct * 100L / ledger.size()),
+                    engine.progressPercent(),
+                    "fallback cells outside the ledger must not inflate progress");
+        }
+        assertEquals(100, engine.progressPercent());
     }
 }
