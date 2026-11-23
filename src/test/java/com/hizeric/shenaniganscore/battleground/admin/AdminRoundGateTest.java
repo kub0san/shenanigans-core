@@ -85,6 +85,22 @@ class AdminRoundGateTest {
     }
 
     @Test
+    void adminForceStartIsDeniedWhileTheFullRestoreIsPending() {
+        AdminRoundGate.Result inFlight = AdminRoundGate.decide(
+                AdminRoundGate.Action.START, RoundState.IDLE, true, true, 0);
+        assertFalse(inFlight.allowed());
+        assertTrue(inFlight.message().contains("restoring"));
+
+        AdminRoundGate.Result ready = AdminRoundGate.decide(
+                AdminRoundGate.Action.START, RoundState.IDLE, true, false, 0);
+        assertTrue(ready.allowed());
+
+        AdminRoundGate.Result restoringState = AdminRoundGate.decide(
+                AdminRoundGate.Action.START, RoundState.RESTORING, true, false, 0);
+        assertFalse(restoringState.allowed());
+    }
+
+    @Test
     void stopRequiresALiveRound() {
         AdminRoundGate.Result idle = AdminRoundGate.decide(
                 AdminRoundGate.Action.STOP, RoundState.IDLE, true, 0);

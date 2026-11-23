@@ -439,7 +439,8 @@ final class RoundController {
         }
         var region = m.arenaStore.region();
         boolean captured = region != null && region.isCaptured();
-        AdminRoundGate.Result result = AdminRoundGate.decide(action, m.state, captured, requestedSeconds);
+        boolean restoring = m.restoreEngine != null && m.restoreEngine.isRestoring();
+        AdminRoundGate.Result result = AdminRoundGate.decide(action, m.state, captured, restoring, requestedSeconds);
         if (!result.allowed()) return result;
         switch (result.effect()) {
             case START -> forceStart();
