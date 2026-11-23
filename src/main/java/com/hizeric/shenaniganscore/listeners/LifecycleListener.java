@@ -3,6 +3,7 @@ package com.hizeric.shenaniganscore.listeners;
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.session.SessionEndReason;
 import com.hizeric.shenaniganscore.core.util.ClientBlockUtils;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashVisibilityMask;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -23,12 +24,15 @@ public class LifecycleListener implements Listener {
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player caster = event.getEntity();
+        // Restore an in-progress dash mask now; the timeline's own clear() would wait a tick.
+        DashVisibilityMask.restore(caster);
         endIfActive(caster, SessionEndReason.CASTER_DEATH);
     }
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player caster = event.getPlayer();
+        DashVisibilityMask.restore(caster);
         // Drop any client-side block overlays bound to the quitter so stale fake blocks and
         // per-player queue state cannot leak across reconnect (F-16, F-48). Quit fires on main.
         ClientBlockUtils.clearPlayer(caster);

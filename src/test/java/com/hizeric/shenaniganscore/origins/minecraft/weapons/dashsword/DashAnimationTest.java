@@ -33,21 +33,22 @@ class DashAnimationTest {
         assertTrue(DashAnimation.beat(DashAnimation.Kind.RIFT_RIBBON).fires(14));
         assertFalse(DashAnimation.beat(DashAnimation.Kind.RIFT_RIBBON).fires(15));
 
+        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(0));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(1));
         assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(2));
-        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(3));
-        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(4));
-        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(20));
-        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(21));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(3));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(18));
+        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(19));
     }
 
     @Test
-    void trailSpawnsOneEchoEveryTwoTicks() {
+    void trailSpawnsOneEchoEveryTickFromOneToEighteen() {
         assertEquals(1, DashAnimation.GHOST_COUNT);
         List<DashAnimation.Frame> echoFrames = DashAnimation.trail().stream()
                 .filter(frame -> frame.spawns().stream()
                         .anyMatch(spawn -> spawn.kind() == DashAnimation.Kind.GHOST_ARC))
                 .toList();
-        assertEquals(List.of(2, 4, 6, 8, 10, 12, 14, 16, 18, 20),
+        assertEquals(List.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18),
                 echoFrames.stream().map(DashAnimation.Frame::tick).toList());
         echoFrames.forEach(frame -> frame.spawns().forEach(
                 spawn -> assertEquals(1, spawn.count())));
@@ -90,6 +91,7 @@ class DashAnimationTest {
 
     @Test
     void ghostScaleShrinksMonotonicallyToItsFloor() {
+        assertEquals(12, DashAnimation.GHOST_LIFE);
         assertEquals(1.0f, DashAnimation.ghostScale(0), 1.0e-6f);
         for (int age = 1; age <= DashAnimation.GHOST_LIFE; age++) {
             assertTrue(DashAnimation.ghostScale(age) < DashAnimation.ghostScale(age - 1),

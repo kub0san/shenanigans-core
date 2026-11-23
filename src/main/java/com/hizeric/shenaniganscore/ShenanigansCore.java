@@ -49,6 +49,7 @@ import com.hizeric.shenaniganscore.listeners.MovementListener;
 import com.hizeric.shenaniganscore.listeners.OverlayListener;
 import com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities;
 import com.hizeric.shenaniganscore.origins.minecraft.MinecraftAbilities;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashVisibilityMask;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.MannequinEchoRenderer;
 import com.hizeric.shenaniganscore.resourcepack.ResourcePackManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
@@ -355,6 +356,9 @@ public final class ShenanigansCore extends JavaPlugin {
         // Client-side mannequin echoes live only in PacketEvents packets; a reload mid-dash would
         // otherwise strand them (and their glow team) on every viewer until relog.
         runSafely("mannequin echoes", () -> MannequinEchoRenderer.shutdown());
+        // Same reason as the echoes: cancelTasks below kills dash timelines without running
+        // their clear(), so any live visibility mask must be restored first.
+        runSafely("dash visibility", () -> DashVisibilityMask.shutdown());
         runSafely("gui", () -> {
             if (battlegroundGui != null) battlegroundGui.shutdown();
         });
