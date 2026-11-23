@@ -86,6 +86,10 @@ class ConfigAutoUpdaterTest {
         String after = Files.readString(bg.toPath());
         assertFalse(after.contains("defer-near-player"), "the retired key must be stripped from disk");
         assertTrue(after.contains("blocks-per-tick: 777"), "a live restore key must survive the merge");
+        File configBackup = new File(bg.getPath() + ".backup");
+        assertTrue(configBackup.exists(), "an obsolete key must be backed up before the rewrite");
+        assertTrue(Files.readString(configBackup.toPath()).contains("defer-near-player"),
+                "the backup preserves the old key for the admin");
         assertTrue(after.contains("config-version: 1"));
     }
 }

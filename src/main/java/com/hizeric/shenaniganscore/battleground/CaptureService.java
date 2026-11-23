@@ -62,12 +62,19 @@ final class CaptureService {
             // isolated below so a probe failure can never flip an otherwise successful capture.
             try {
                 World arenaWorld = region.world();
-                if (arenaWorld != null && DropZone.hasThinFloor(new BukkitDropProbe(arenaWorld),
-                        region.min().getBlockX(), region.max().getBlockX(),
-                        region.min().getBlockZ(), region.max().getBlockZ(),
-                        region.min().getBlockY(), BattlegroundDefaults.DEPLOY_SAMPLE_STEP * 4)) {
-                    m.plugin.getLogger().warning("Arena map '" + id + "' has a single-block-thick floor; "
-                            + "deploy works, but a 2-layer floor is recommended.");
+                if (arenaWorld != null
+                        && (DropZone.hasThinFloor(new BukkitDropProbe(arenaWorld),
+                                region.min().getBlockX(), region.max().getBlockX(),
+                                region.min().getBlockZ(), region.max().getBlockZ(),
+                                region.min().getBlockY(), BattlegroundDefaults.DEPLOY_SAMPLE_STEP * 4)
+                                || DropZone.hasMisconfiguredFloorY(new BukkitDropProbe(arenaWorld),
+                                        region.min().getBlockX(), region.max().getBlockX(),
+                                        region.min().getBlockZ(), region.max().getBlockZ(),
+                                        region.min().getBlockY(), region.max().getBlockY(),
+                                        BattlegroundDefaults.DEPLOY_SAMPLE_STEP * 4))) {
+                    m.plugin.getLogger().warning("Arena map '" + id + "' has a single-block-thick floor "
+                            + "(or its region bounds sit below the real floor); deploy works, but a "
+                            + "2-layer floor is recommended.");
                 }
             } catch (Exception advisory) {
                 m.plugin.getLogger().log(Level.FINE,
