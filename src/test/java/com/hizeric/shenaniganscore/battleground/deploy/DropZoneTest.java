@@ -64,6 +64,11 @@ class DropZoneTest {
                         new DropZone.Tier(Integer.MAX_VALUE, Integer.MAX_VALUE, -1e9)));
     }
 
+    private static DropZone.Config thinFloorConfig(int floorY) {
+        return new DropZone.Config(1, -64, floorY + 50, 20, 3, 10,
+                floorY, floorY + 50, 12, 8, 5, config().tiers());
+    }
+
     private static DropCohort cohort(DropZone.Point... anchors) {
         return new DropCohort(java.util.Arrays.stream(anchors)
                 .map(p -> new DropCohort.Anchor(p.x(), p.z(), 1.0)).toList(), List.of());
@@ -373,5 +378,129 @@ class DropZoneTest {
         assertEquals(30, selection.candidate().groundY());
         assertTrue(selection.candidate().spawnY() > 45,
                 "spawn must be above an obstruction above the clearance band");
+    }
+
+    @Test
+    void thinFloorAtRegionMinYIsSelected() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) probe.set(x, 30, z, Block.SOLID);
+        }
+
+        DropZone.Selection selection = DropZone.select(probe, -4, 4, -4, 4,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertTrue(selection.found(), "a one-layer floor at region min Y is standable");
+        assertEquals(30, selection.candidate().groundY());
+        assertEquals(50, selection.candidate().spawnY());
+    }
+
+    @Test
+    void thinFloorOverVoidIsSelected() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) probe.set(x, 30, z, Block.SOLID);
+        }
+
+        DropZone.Selection selection = DropZone.select(probe, -4, 4, -4, 4,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertTrue(selection.found(), "air below the floor layer must not disqualify it");
+        assertEquals(30, selection.candidate().groundY());
+    }
+
+    @Test
+    void caveBelowThinFloorIsIgnored() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) probe.set(x, 30, z, Block.SOLID);
+        }
+        probe.slab(-4, 4, -4, 4, 20);
+
+        DropZone.Selection selection = DropZone.select(probe, -4, 4, -4, 4,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertTrue(selection.found());
+        assertEquals(30, selection.candidate().groundY(), "the supported cave below is never the surface");
+    }
+
+    @Test
+    void thinFloorWallTopCornersAreNotSelected() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -8; x <= 8; x++) {
+            for (int z = -8; z <= 8; z++) probe.set(x, 80, z, Block.SOLID);
+        }
+        for (int y = 80; y <= 95; y++) {
+            for (int i = -8; i <= 8; i++) {
+                probe.set(-8, y, i, Block.SOLID);
+                probe.set(8, y, i, Block.SOLID);
+                probe.set(i, y, -8, Block.SOLID);
+                probe.set(i, y, 8, Block.SOLID);
+            }
+        }
+
+        DropZone.Selection selection = DropZone.select(probe, -8, 8, -8, 8,
+                DropCohort.empty(), thinFloorConfig(80), new Random(1));
+
+        assertTrue(selection.found(), "the interior thin floor is still selectable");
+        assertEquals(80, selection.candidate().groundY());
+        assertTrue(Math.abs(selection.candidate().x()) < 8 && Math.abs(selection.candidate().z()) < 8,
+                "wall-top columns must not be the landing spot");
+    }
+
+    @Test
+    void loneSolidBlockAtFloorPlaneIsRejected() {
+        FakeProbe probe = new FakeProbe();
+        probe.set(0, 30, 0, Block.SOLID);
+
+        DropZone.Selection selection = DropZone.select(probe, -4, 4, -4, 4,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertFalse(selection.found(), "a lone block still lacks lateral support");
+    }
+
+    @Test
+    void floatingPlatformAboveFloorPlaneIsStillRejected() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) probe.set(x, 40, z, Block.SOLID);
+        }
+
+        DropZone.Selection selection = DropZone.select(probe, -4, 4, -4, 4,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertFalse(selection.found(), "relaxation applies only at the floor plane, not above it");
+    }
+
+    @Test
+    void liquidToppedThinFloorIsNotSelected() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) probe.set(x, 30, z, Block.SOLID);
+        }
+        probe.set(0, 31, 0, Block.LIQUID);
+
+        DropZone.Selection selection = DropZone.select(probe, -2, 2, -2, 2,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertTrue(selection.found());
+        assertFalse(selection.candidate().x() == 0 && selection.candidate().z() == 0,
+                "a liquid-topped column cannot be the drop target");
+    }
+
+    @Test
+    void thinFloorPatchNearBoundaryIsFound() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = 10; x <= 12; x++) {
+            for (int z = 10; z <= 12; z++) probe.set(x, 30, z, Block.SOLID);
+        }
+
+        DropZone.Selection selection = DropZone.select(probe, -12, 12, -12, 12,
+                DropCohort.empty(), thinFloorConfig(30), new Random(1));
+
+        assertTrue(selection.found(), "a small thin-floor patch must be found despite the coarse stride");
+        assertTrue(selection.candidate().x() >= 10 && selection.candidate().x() <= 12
+                        && selection.candidate().z() >= 10 && selection.candidate().z() <= 12,
+                "the selected spot lies in the patch");
     }
 }
