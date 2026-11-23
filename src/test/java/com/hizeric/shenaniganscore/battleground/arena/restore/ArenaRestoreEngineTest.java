@@ -9,7 +9,9 @@ import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot.ChunkPos;
 import com.hizeric.shenaniganscore.core.util.BlockKey;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Player;
 import org.bukkit.util.BlockVector;
 import org.junit.jupiter.api.Test;
 
@@ -73,11 +75,50 @@ class ArenaRestoreEngineTest {
                 });
     }
 
+    @SuppressWarnings("unchecked")
+    private static Player playerProxy(int x, int z) {
+        return (Player) Proxy.newProxyInstance(ArenaRestoreEngineTest.class.getClassLoader(),
+                new Class<?>[]{Player.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "isDead" -> false;
+                    case "getLocation" -> new Location(WORLD, x, 60, z);
+                    case "toString" -> "FakePlayer(" + x + "," + z + ")";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> null;
+                });
+    }
+
+    /** Forced world with the same probe cases as fakeWorld plus a live player view. */
+    @SuppressWarnings("unchecked")
+    private static World worldWithPlayers(List<int[]> players) {
+        return (World) Proxy.newProxyInstance(ArenaRestoreEngineTest.class.getClassLoader(),
+                new Class<?>[]{World.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getName" -> "test-world";
+                    case "getPlayers" -> {
+                        List<Player> result = new ArrayList<>(players.size());
+                        for (int[] player : players) result.add(playerProxy(player[0], player[1]));
+                        yield result;
+                    }
+                    case "isChunkLoaded" -> true;
+                    case "toString" -> "FakeWorld";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> null;
+                });
+    }
+
+    private static World worldWithPlayers(int... xz) {
+        List<int[]> players = new ArrayList<>();
+        for (int i = 0; i + 1 < xz.length; i += 2) players.add(new int[]{xz[i], xz[i + 1]});
+        return worldWithPlayers(players);
+    }
+
     /** Everything the fakes observe during a run. */
     private static final class Fixture {
         final List<Long> writes = new ArrayList<>();
         final List<Long> physics = new ArrayList<>();
-        final List<int[]> players = new ArrayList<>();
         final Deque<Runnable> tasks = new ArrayDeque<>();
     }
 
@@ -85,7 +126,7 @@ class ArenaRestoreEngineTest {
                                              ArenaRestoreEngine.MainRunner runner,
                                              ArenaRestoreEngine.ChunkLoader loader,
                                              ArenaRestoreEngine.StateProbe probe) {
-        return engine(fx, policy, runner, loader, probe, null);
+        return engine(fx, policy, runner, loader, probe, (Runnable) null, WORLD);
     }
 
     private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
@@ -93,16 +134,31 @@ class ArenaRestoreEngineTest {
                                              ArenaRestoreEngine.ChunkLoader loader,
                                              ArenaRestoreEngine.StateProbe probe,
                                              Runnable onTierOneComplete) {
+        return engine(fx, policy, runner, loader, probe, onTierOneComplete, WORLD);
+    }
+
+    private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
+                                             ArenaRestoreEngine.MainRunner runner,
+                                             ArenaRestoreEngine.ChunkLoader loader,
+                                             ArenaRestoreEngine.StateProbe probe,
+                                             World forcedWorld) {
+        return engine(fx, policy, runner, loader, probe, null, forcedWorld);
+    }
+
+    private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
+                                             ArenaRestoreEngine.MainRunner runner,
+                                             ArenaRestoreEngine.ChunkLoader loader,
+                                             ArenaRestoreEngine.StateProbe probe,
+                                             Runnable onTierOneComplete, World forcedWorld) {
         Deps deps = new Deps(loader, runner,
                 (world, packed, state, physics) -> {
                     fx.writes.add(packed);
                     if (physics) fx.physics.add(packed);
                 },
-                world -> fx.players,
                 probe,
                 () -> policy,
                 new TicketLedger<>(key -> { }, key -> { }),
-                WORLD);
+                forcedWorld);
         return new ArenaRestoreEngine(deps, LOG, onTierOneComplete, () -> 0L);
     }
 
@@ -140,8 +196,8 @@ class ArenaRestoreEngineTest {
         return new DiffLog.Decoded("ffa", 1L, true, positions, null);
     }
 
-    private static Policy policy(int blocksPerTick, boolean verify, boolean fallback, boolean defer) {
-        return new Policy(100_000, blocksPerTick, 4, 8, false, verify, fallback, defer);
+    private static Policy policy(int blocksPerTick, boolean verify, boolean fallback) {
+        return new Policy(100_000, blocksPerTick, 4, 8, false, verify, fallback);
     }
 
     private static void drive(ArenaRestoreEngine engine) {
@@ -152,7 +208,7 @@ class ArenaRestoreEngineTest {
     @Test
     void boundedSlicesWriteEveryPositionBeforeCompletion() {
         Fixture fx = new Fixture();
-        ArenaRestoreEngine engine = engine(fx, policy(2, false, false, false), SYNC, OK_LOADER, STONE);
+        ArenaRestoreEngine engine = engine(fx, policy(2, false, false), SYNC, OK_LOADER, STONE);
         Set<Long> positions = set(
                 BlockKey.pack(1, 60, 1), BlockKey.pack(2, 60, 1), BlockKey.pack(4, 60, 1),
                 BlockKey.pack(5, 60, 1), BlockKey.pack(7, 60, 1));
@@ -172,12 +228,12 @@ class ArenaRestoreEngineTest {
     @Test
     void stationaryPlayerOnCellStillGetsWritten() {
         Fixture fx = new Fixture();
-        ArenaRestoreEngine engine = engine(fx, policy(2, false, false, true), SYNC, OK_LOADER, STONE);
         long underFeet = BlockKey.pack(1, 60, 1);
         long beside = BlockKey.pack(2, 60, 1);
         long far = BlockKey.pack(10, 60, 10);
         Set<Long> all = set(underFeet, beside, far);
-        fx.players.add(new int[]{1, 1}); // stationary for every step
+        ArenaRestoreEngine engine = engine(fx, policy(2, false, false), SYNC, OK_LOADER, STONE,
+                worldWithPlayers(1, 1)); // stationary for every step
 
         assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
         drive(engine);
@@ -192,14 +248,12 @@ class ArenaRestoreEngineTest {
     @Test
     void multiplePlayersDoNotCreateAPendingSet() {
         Fixture fx = new Fixture();
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, true), SYNC, OK_LOADER, STONE);
         long underA = BlockKey.pack(1, 60, 1);
         long underB = BlockKey.pack(10, 60, 10);
         long underC = BlockKey.pack(2, 60, 1);
         Set<Long> all = set(underA, underB, underC);
-        fx.players.add(new int[]{1, 1});
-        fx.players.add(new int[]{10, 10});
-        fx.players.add(new int[]{2, 1});
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false), SYNC, OK_LOADER, STONE,
+                worldWithPlayers(1, 1, 10, 10, 2, 1));
 
         assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
         drive(engine);
@@ -212,15 +266,17 @@ class ArenaRestoreEngineTest {
     @Test
     void playerLeavingMidRestoreWritesFromTheFirstStep() {
         Fixture fx = new Fixture();
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, true), SYNC, OK_LOADER, STONE);
         Set<Long> all = set(BlockKey.pack(1, 60, 1), BlockKey.pack(2, 60, 1), BlockKey.pack(1, 60, 2));
-        fx.players.add(new int[]{1, 1}); // on the very first cell
+        List<int[]> players = new ArrayList<>();
+        players.add(new int[]{1, 1}); // on the very first cell
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false), SYNC, OK_LOADER, STONE,
+                worldWithPlayers(players));
 
         assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
         engine.restoreStep(null);
         assertEquals(1, fx.writes.size(), "the first step must write a cell under a stationary player");
 
-        fx.players.clear(); // player leaves the arena mid-restore
+        players.clear(); // player leaves: the forced world's player view is rebuilt empty
         drive(engine);
         assertFalse(engine.isRestoring());
         assertEquals(all, Set.copyOf(fx.writes));
@@ -238,9 +294,8 @@ class ArenaRestoreEngineTest {
         };
         long oldCell = BlockKey.pack(1, 60, 1);
         long newCell = BlockKey.pack(2, 60, 2);
-        fx.players.add(new int[]{1, 1});
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, true),
-                task -> fx.tasks.add(task), holding, STONE);
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false),
+                task -> fx.tasks.add(task), holding, STONE, worldWithPlayers(1, 1));
 
         assertTrue(engine.beginRestore(region(), "ffa", diff(set(oldCell)), stoneChunks(15, 15)));
         engine.restoreStep(null);
@@ -266,7 +321,7 @@ class ArenaRestoreEngineTest {
     @Test
     void progressTracksDistinctLedgerPositions() {
         Fixture fx = new Fixture();
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false), SYNC, OK_LOADER, STONE);
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false), SYNC, OK_LOADER, STONE);
         Set<Long> all = set(
                 BlockKey.pack(0, 60, 0), BlockKey.pack(3, 60, 0),   // tier 1 (sampled columns)
                 BlockKey.pack(6, 60, 0), BlockKey.pack(9, 60, 0),
@@ -299,7 +354,7 @@ class ArenaRestoreEngineTest {
         int[] gateCalls = {0};
         // One chunk per tick keeps the shared block budget per chunk; the three-position chunk
         // still needs two slices, so its first slice is a per-job non-final slice with a remainder.
-        Policy oneChunkPerTick = new Policy(100_000, 2, 1, 2, false, false, false, false);
+        Policy oneChunkPerTick = new Policy(100_000, 2, 1, 2, false, false, false);
         ArenaRestoreEngine engine = engine(fx, oneChunkPerTick,
                 task -> fx.tasks.add(task), OK_LOADER, STONE, () -> gateCalls[0]++);
         long solo = BlockKey.pack(0, 60, 0);       // chunk (0,0): a single-slice tier-1 chunk
@@ -349,7 +404,7 @@ class ArenaRestoreEngineTest {
             if (loads[0]++ == 1) throw new IllegalStateException("second load failed");
             return CompletableFuture.completedFuture(CHUNK);
         };
-        ArenaRestoreEngine engine = engine(fx, policy(2, false, false, false),
+        ArenaRestoreEngine engine = engine(fx, policy(2, false, false),
                 task -> fx.tasks.add(task), failingSecondLoad, STONE);
         Set<Long> all = set(
                 BlockKey.pack(1, 60, 1), BlockKey.pack(2, 60, 1),
@@ -370,7 +425,7 @@ class ArenaRestoreEngineTest {
         Fixture fx = new Fixture();
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
                 (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
-        ArenaRestoreEngine engine = engine(fx, policy(4, true, true, false), SYNC, OK_LOADER, unloggedProbe);
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER, unloggedProbe);
         Set<Long> ledger = set(
                 BlockKey.pack(2, 60, 1), BlockKey.pack(4, 60, 1),
                 BlockKey.pack(5, 60, 1), BlockKey.pack(7, 60, 1));
@@ -405,7 +460,7 @@ class ArenaRestoreEngineTest {
         int[] gateCalls = {0};
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
                 (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
-        ArenaRestoreEngine engine = engine(fx, policy(4, true, true, false), SYNC, OK_LOADER,
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER,
                 unloggedProbe, () -> gateCalls[0]++);
         long tierOne = BlockKey.pack(0, 60, 0); // sampled grid surface -> tier-1 essential
         ArenaSnapshot snapshot = stoneChunks(60, 60, 15, 15);
@@ -439,7 +494,7 @@ class ArenaRestoreEngineTest {
         int[] gateCalls = {0};
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
                 (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
-        ArenaRestoreEngine engine = engine(fx, policy(4, true, false, false), SYNC, OK_LOADER,
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, false), SYNC, OK_LOADER,
                 unloggedProbe, () -> gateCalls[0]++);
         long tierOne = BlockKey.pack(0, 60, 0);
 
@@ -467,7 +522,7 @@ class ArenaRestoreEngineTest {
         int[] gateCalls = {0};
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
                 (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
-        ArenaRestoreEngine engine = engine(fx, policy(4, true, true, false), SYNC, OK_LOADER,
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER,
                 unloggedProbe, () -> gateCalls[0]++);
         long tierOne = BlockKey.pack(0, 60, 0); // sampled grid surface -> tier-1 essential
 
@@ -497,7 +552,7 @@ class ArenaRestoreEngineTest {
             };
             Policy policy = new Policy(100_000, 1, chunksPerTick,
                     chunksPerTick * ArenaChunkWork.SECTIONS_PER_CHUNK_CAP,
-                    false, false, false, false);
+                    false, false, false);
             ArenaRestoreEngine engine = engine(fx, policy, task -> { }, counting, STONE);
             Set<Long> ledger = new LinkedHashSet<>();
             for (int cz = 0; cz < 4; cz++) {
@@ -529,7 +584,7 @@ class ArenaRestoreEngineTest {
             futures.add(future);
             return future;
         };
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false),
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false),
                 task -> fx.tasks.add(task), holding, STONE);
         long old = BlockKey.pack(1, 60, 1);
         long latest = BlockKey.pack(2, 60, 2);
@@ -567,7 +622,7 @@ class ArenaRestoreEngineTest {
             futures.add(future);
             return future;
         };
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false),
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false),
                 task -> fx.tasks.add(task), holding, STONE);
         engine.effects(new RestoreEffects() {
             @Override public void onFinished(World world, boolean wasFailed) {
@@ -609,7 +664,7 @@ class ArenaRestoreEngineTest {
             futures.add(future);
             return future;
         };
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false),
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false),
                 task -> fx.tasks.add(task), holding, STONE);
         engine.effects(new RestoreEffects() {
             @Override public void onFinished(World world, boolean wasFailed) { finishes[0]++; }
@@ -639,7 +694,7 @@ class ArenaRestoreEngineTest {
         Fixture fx = new Fixture();
         int[] finishes = {0};
         boolean[] failed = {true};
-        ArenaRestoreEngine engine = engine(fx, policy(1, false, false, false), SYNC, OK_LOADER, STONE);
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false), SYNC, OK_LOADER, STONE);
         engine.effects(new RestoreEffects() {
             @Override public void onFinished(World world, boolean wasFailed) {
                 finishes[0]++;
@@ -664,7 +719,7 @@ class ArenaRestoreEngineTest {
     @Test
     void relightSecondWriteIsBilledToTheBlockBudget() {
         Fixture fx = new Fixture();
-        Policy policy = new Policy(100_000, 2, 4, 8, true, false, false, false);
+        Policy policy = new Policy(100_000, 2, 4, 8, true, false, false);
         ArenaRestoreEngine engine = engine(fx, policy, SYNC, OK_LOADER, STONE);
         long first = BlockKey.pack(1, 60, 1);
         long second = BlockKey.pack(2, 60, 1);

@@ -21,8 +21,6 @@ public final class ArenaChunkWork {
 
     /** Two sections per chunk, the section-cap ruling carried forward from the SDD ledger. */
     public static final int SECTIONS_PER_CHUNK_CAP = 2;
-    /** The design's "small radius" deferral call, in blocks. */
-    public static final double DEFER_RADIUS_BLOCKS = 12.0;
 
     private static final List<String> LIGHT_OR_FLUID = List.of(
             "water", "lava", "light", "torch", "lantern", "glow", "fire", "flame",
@@ -32,7 +30,7 @@ public final class ArenaChunkWork {
 
     /** Snapshot of the live restore tuning, derived once per restore step. */
     public record Policy(int msPerTick, int blocksPerTick, int chunksPerTick, int sectionsPerTick,
-                         boolean relight, boolean verify, boolean fallback, boolean deferNearPlayer) {
+                         boolean relight, boolean verify, boolean fallback) {
 
         public static Policy from(ArenaRuntimeConfig config) {
             ArenaRuntimeConfig live = config == null ? ArenaRuntimeConfig.defaults() : config;
@@ -44,8 +42,7 @@ public final class ArenaChunkWork {
                     chunks * SECTIONS_PER_CHUNK_CAP,
                     live.restoreRelight(),
                     live.restoreVerify(),
-                    live.restoreFallbackOnUnverified(),
-                    live.restoreDeferNearPlayer());
+                    live.restoreFallbackOnUnverified());
         }
     }
 
@@ -162,17 +159,5 @@ public final class ArenaChunkWork {
             if (needsRelight(baselineState.apply(packed))) targets.add(packed);
         }
         return targets;
-    }
-
-    /** Pure coordinate form of "defer cells near a live player" (inclusive boundary). */
-    public static boolean nearPlayer(int x, int z, List<int[]> players, double radius) {
-        if (players == null || players.isEmpty()) return false;
-        double radiusSquared = radius * radius;
-        for (int[] player : players) {
-            double dx = x - player[0];
-            double dz = z - player[1];
-            if (dx * dx + dz * dz <= radiusSquared) return true;
-        }
-        return false;
     }
 }

@@ -9,15 +9,14 @@ import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * Pure, server-free queue and accounting seam for {@link ArenaRestoreEngine}.
  *
  * <p>Every decision that used to lose data lives here: a slice is removed from a job only when it
- * is actually dispatched, and the job carrying the remaining (including deferred) positions is
- * re-queued in the same operation. Tier 1 and tier 2 use separate deques so a re-queued tier-1
- * remainder can never be starved behind gated tier-2 jobs.</p>
+ * is actually dispatched, and the job carrying its bounded remainder is re-queued in the same
+ * operation. Tier 1 and tier 2 use separate deques so a re-queued tier-1 remainder can never be
+ * starved behind gated tier-2 jobs.</p>
  *
  * <p>Performance notes versus the first version:</p>
  * <ul>
@@ -156,46 +155,32 @@ final class ArenaRestoreQueue {
 
     /**
      * Picks the next bounded slice. The picked positions are removed from the job; the job holding
-     * the remainder (including near-player deferred cells) is re-queued before this method returns,
-     * so nothing can be dropped when the engine polls the dispatch.
+     * the bounded remainder is re-queued before this method returns, so nothing can be dropped when
+     * the engine polls the dispatch.
      */
-    Dispatch next(int blockCap, Predicate<Long> deferred) {
+    Dispatch next(int blockCap) {
         if (failed || cancelled) return null;
-        if (!tierOneJobs.isEmpty()) return nextFrom(tierOneJobs, blockCap, deferred);
+        if (!tierOneJobs.isEmpty()) return nextFrom(tierOneJobs, blockCap);
         if (!canDispatchTierTwo()) return null;
         if (!verificationJobs.isEmpty()) {
             return new Dispatch(verificationJobs.removeFirst(), List.of(), false, true);
         }
-        return tierTwoJobs.isEmpty() ? null : nextFrom(tierTwoJobs, blockCap, deferred);
+        return tierTwoJobs.isEmpty() ? null : nextFrom(tierTwoJobs, blockCap);
     }
 
-    private Dispatch nextFrom(Deque<Job> source, int blockCap, Predicate<Long> deferred) {
+    private Dispatch nextFrom(Deque<Job> source, int blockCap) {
         Job job = source.peekFirst();
         List<Long> pending = job.pending();
         int cap = Math.max(1, blockCap);
         List<Long> slice = new ArrayList<>(Math.min(cap, pending.size()));
-        List<Long> deferredCells = null;
 
         int index = 0;
         int size = pending.size();
         while (index < size && slice.size() < cap) {
-            long packed = pending.get(index++);
-            if (deferred != null && deferred.test(packed)) {
-                if (deferredCells == null) deferredCells = new ArrayList<>();
-                deferredCells.add(packed); // stays pending, retried later
-            } else {
-                slice.add(packed);
-            }
+            slice.add(pending.get(index++));
         }
 
-        if (slice.isEmpty() && !pending.isEmpty()) {
-            source.addLast(source.removeFirst()); // every cell deferred this tick
-            return null;
-        }
-
-        List<Long> remainder = new ArrayList<>(
-                (deferredCells == null ? 0 : deferredCells.size()) + (size - index));
-        if (deferredCells != null) remainder.addAll(deferredCells);
+        List<Long> remainder = new ArrayList<>(size - index);
         if (index < size) remainder.addAll(pending.subList(index, size));
 
         source.removeFirst();
