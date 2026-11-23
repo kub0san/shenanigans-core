@@ -30,10 +30,10 @@ public final class ExecutionerSwordItem {
 
     /** Catalogue price in credits. */
     public static final int PRICE = 500;
-    /** Shipped executioner cooldown; the live value comes from {@code abilities.items.executioner-sword.cooldown}. */
+    /** Shipped executioner cooldown; the live value comes from {@code abilities.items.executioners-sword.cooldown}. */
     public static final int DEFAULT_COOLDOWN_SECONDS = 90;
 
-    public static final AbilityId ABILITY_ID = AbilityId.of("minecraft:executioner_sword");
+    public static final AbilityId ABILITY_ID = AbilityId.of("minecraft:executioners_sword");
 
     /** HP threshold (3 hearts) at contact that decides uppercut vs execution. */
     public static final double EXECUTE_THRESHOLD = 6.0;
@@ -52,7 +52,7 @@ public final class ExecutionerSwordItem {
 
     /** Live executioner cooldown in seconds, swapped by {@code /bg reload}. */
     public static int cooldownSeconds() {
-        return AbilityTuningConfig.current().cooldown(ITEMS, "executioner-sword", DEFAULT_COOLDOWN_SECONDS);
+        return AbilityTuningConfig.current().cooldown(ITEMS, "executioners-sword", DEFAULT_COOLDOWN_SECONDS);
     }
 
     /** Raw MiniMessage lore lines, exposed so tuning can be asserted without a Bukkit server. */

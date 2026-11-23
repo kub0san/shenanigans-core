@@ -1,6 +1,7 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword;
 
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
+import org.bukkit.Material;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -41,7 +42,15 @@ class ExecutionerDefaultsTest {
 
     @Test
     void abilityIdIsNamespaced() {
-        assertEquals("minecraft:executioner_sword", ExecutionerSwordItem.ABILITY_ID.toString());
+        assertEquals("minecraft:executioners_sword", ExecutionerSwordItem.ABILITY_ID.toString());
+    }
+
+    @Test
+    void registeredDefinitionIsVisibleWithDiamondSwordIcon() {
+        var definition = ExecutionerSwordAbility.definition(new ExecutionerSwordHitListener());
+        assertEquals("minecraft:executioners_sword", definition.id().toString());
+        assertEquals(Material.DIAMOND_SWORD, definition.iconMaterial());
+        assertEquals(false, definition.hidden());
     }
 
     @Test
@@ -50,7 +59,7 @@ class ExecutionerDefaultsTest {
         assertNotNull(url);
         AbilityTuningConfig.load(new File(url.toURI()), Logger.getLogger("test"));
         // Fallback (7) differs from the shipped value (90) to prove the shipped value is read.
-        assertEquals(90, AbilityTuningConfig.current().cooldown(ITEMS, "executioner-sword", 7));
+        assertEquals(90, AbilityTuningConfig.current().cooldown(ITEMS, "executioners-sword", 7));
         assertEquals(90, ExecutionerSwordItem.cooldownSeconds());
     }
 }
