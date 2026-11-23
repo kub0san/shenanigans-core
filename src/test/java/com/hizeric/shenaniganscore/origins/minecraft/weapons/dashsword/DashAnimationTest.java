@@ -34,8 +34,23 @@ class DashAnimationTest {
         assertFalse(DashAnimation.beat(DashAnimation.Kind.RIFT_RIBBON).fires(15));
 
         assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(2));
+        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(3));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(4));
         assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(20));
         assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(21));
+    }
+
+    @Test
+    void trailSpawnsOneEchoEveryTwoTicks() {
+        assertEquals(1, DashAnimation.GHOST_COUNT);
+        List<DashAnimation.Frame> echoFrames = DashAnimation.trail().stream()
+                .filter(frame -> frame.spawns().stream()
+                        .anyMatch(spawn -> spawn.kind() == DashAnimation.Kind.GHOST_ARC))
+                .toList();
+        assertEquals(List.of(2, 4, 6, 8, 10, 12, 14, 16, 18, 20),
+                echoFrames.stream().map(DashAnimation.Frame::tick).toList());
+        echoFrames.forEach(frame -> frame.spawns().forEach(
+                spawn -> assertEquals(1, spawn.count())));
     }
 
     @Test
@@ -74,8 +89,13 @@ class DashAnimationTest {
     }
 
     @Test
-    void ghostScaleShrinksWithAge() {
+    void ghostScaleShrinksMonotonicallyToItsFloor() {
         assertEquals(1.0f, DashAnimation.ghostScale(0), 1.0e-6f);
-        assertTrue(DashAnimation.ghostScale(DashAnimation.GHOST_LIFE) < 0.1f);
+        for (int age = 1; age <= DashAnimation.GHOST_LIFE; age++) {
+            assertTrue(DashAnimation.ghostScale(age) < DashAnimation.ghostScale(age - 1),
+                    "scale must shrink at age " + age);
+        }
+        assertEquals(0.05f, DashAnimation.ghostScale(DashAnimation.GHOST_LIFE), 1.0e-6f);
+        assertEquals(0.05f, DashAnimation.ghostScale(DashAnimation.GHOST_LIFE + 10), 1.0e-6f);
     }
 }
