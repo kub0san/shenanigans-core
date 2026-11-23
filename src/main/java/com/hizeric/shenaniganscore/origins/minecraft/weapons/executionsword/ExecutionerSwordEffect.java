@@ -66,12 +66,11 @@ public final class ExecutionerSwordEffect {
         Vector savedVelocity = target.getVelocity().clone();
         int savedNoDamageTicks = target.getNoDamageTicks();
 
-        target.setNoDamageTicks(100);
-
+        target.setNoDamageTicks(0);
         if (target.getHealth() > 1.0) {
             target.damage(0.5, caster);
-            target.setNoDamageTicks(100);
         }
+        target.setNoDamageTicks(100);
 
         boolean roundActiveAtStart = false;
         BattlegroundManager manager = plugin.getBattlegroundManager();
@@ -384,7 +383,7 @@ public final class ExecutionerSwordEffect {
                 if (target.isOnline() && !target.isDead() && target.getHealth() > 0.0) {
                     target.setHealth(0.0);
                     BattlegroundManager m = plugin.getBattlegroundManager();
-                    if (m != null) {
+                    if (m != null && m.isDeployed(caster.getUniqueId()) && m.isDeployed(target.getUniqueId())) {
                         m.combat().record(target.getUniqueId(), caster.getUniqueId(), 999.0);
                     }
                 }
