@@ -193,7 +193,7 @@ public final class ShenanigansCore extends JavaPlugin {
         this.abilityRegistry = new AbilityRegistry(message -> getLogger().warning(message));
         this.abilityCaster = new AbilityCaster(abilityRegistry, cooldownManager);
         JujutsuAbilities.register(abilityRegistry);
-        MinecraftAbilities.register(abilityRegistry);
+        MinecraftAbilities.register(abilityRegistry, this);
         getLogger().info("Registered " + abilityRegistry.size() + " abilities.");
 
         this.battlegroundManager = new BattlegroundManager(this);

@@ -16,7 +16,6 @@ import org.bukkit.Material;
 public final class DashSwordAbility {
 
     public static final AbilityId ID = DashSwordItem.ABILITY_ID;
-    public static final int COOLDOWN_SECONDS = 6;
 
     private static final MiniMessage MM = MiniMessage.miniMessage();
 
@@ -28,7 +27,7 @@ public final class DashSwordAbility {
                 MM.deserialize("<aqua><bold>Dash"),
                 Material.NETHERITE_SWORD,
                 0,
-                () -> COOLDOWN_SECONDS,
+                DashSwordItem::cooldownSeconds,
                 1.0,
                 (player, power) -> DashSwordEffect.launch(player),
                 player -> ShenanigansCore.getInstance().getSessionManager()

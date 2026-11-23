@@ -7,11 +7,7 @@ import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.attribute.Attribute;
-import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.enchantments.Enchantment;
-import org.bukkit.inventory.EquipmentSlotGroup;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
@@ -21,12 +17,12 @@ import static com.hizeric.shenaniganscore.core.config.AbilityTuningConfig.Sectio
 
 /**
  * The v1 catalogue's only custom item: a netherite blade that carries its own dash ability and a
- * permanent Speed I passive while held.
+ * passive that refunds one second of dash cooldown per landed hit.
  *
- * <p>The passive is an item attribute modifier rather than a listener: it needs no scheduler, it
- * disappears the instant the sword leaves the hand, and it survives the serialize round-trip into
- * {@code shop.yml}. The ability id is stamped in persistent data so the catalog can recognise the
- * item even after an admin edits the delivered stack.</p>
+ * <p>The refund lives in {@link DashSwordHitListener}, not in the item: a held movement-speed
+ * modifier stacked additively with Speed potions, so the item now only owns its durable identity.
+ * The ability id is stamped in persistent data so the catalog can recognise the item even after an
+ * admin edits the delivered stack.</p>
  */
 public final class DashSwordItem {
 
@@ -47,12 +43,6 @@ public final class DashSwordItem {
     public static final int FIRE_ASPECT_LEVEL = 2;
     public static final String LORE_LINE = "Self explanatory...";
 
-    private static final NamespacedKey SPEED_MODIFIER_KEY =
-            new NamespacedKey("shenaniganscore", "dash_sword_speed");
-
-    /** Speed I is +20% movement speed; the modifier is scoped to holding the sword. */
-    private static final double SPEED_I_SCALAR = 0.20;
-
     private static final MiniMessage MM = MiniMessage.miniMessage();
 
     private DashSwordItem() { }
@@ -68,7 +58,7 @@ public final class DashSwordItem {
                 "<gray>" + LORE_LINE,
                 "",
                 "<dark_gray>Slot 1 <dark_gray>» <white>Dash <dark_gray>| <gray>" + cooldownSeconds() + "s cooldown",
-                "<dark_gray>Passive <dark_gray>» <white>Speed I <dark_gray>while held");
+                "<dark_gray>Passive <dark_gray>» <white>-1s dash cooldown per hit");
     }
 
     public static ItemStack build() {
@@ -82,13 +72,6 @@ public final class DashSwordItem {
         meta.addEnchant(Enchantment.SHARPNESS, SHARPNESS_LEVEL, true);
         meta.addEnchant(Enchantment.UNBREAKING, UNBREAKING_LEVEL, true);
         meta.addEnchant(Enchantment.FIRE_ASPECT, FIRE_ASPECT_LEVEL, true);
-
-        // Adding any explicit modifier replaces the item's implicit type defaults, so copy the
-        // netherite sword's attack damage/speed first, then layer the held-hand speed passive on top.
-        meta.setAttributeModifiers(stack.getType().getDefaultAttributeModifiers());
-        meta.addAttributeModifier(Attribute.MOVEMENT_SPEED,
-                new AttributeModifier(SPEED_MODIFIER_KEY, SPEED_I_SCALAR,
-                        AttributeModifier.Operation.ADD_SCALAR, EquipmentSlotGroup.HAND));
 
         BattlegroundItemKeys.stamp(meta, ID);
 

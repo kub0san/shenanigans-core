@@ -53,6 +53,35 @@ public class CooldownManager {
     }
 
     /**
+     * Shortens an active cooldown by {@code seconds} without ever extending or reviving it.
+     *
+     * <p>The recorded total is deliberately left alone: gauges read it as the original duration
+     * while the remaining time moves independently. A reduction past the end time clamps at now,
+     * so the cooldown simply finishes early.</p>
+     *
+     * @return {@code true} when an active cooldown was actually shortened
+     */
+    public boolean reduceCooldown(UUID uuid, String key, int seconds) {
+        if (uuid == null || key == null || seconds <= 0) return false;
+        long now = System.currentTimeMillis();
+        long reduction = seconds * 1000L;
+        boolean[] changed = {false};
+        if (GLOBAL_KEY.equals(key)) {
+            cooldowns.compute(uuid, (id, endsAt) -> shortened(endsAt, now, reduction, changed));
+        } else {
+            keyedCooldowns.computeIfAbsent(key, ignored -> new ConcurrentHashMap<>())
+                    .compute(uuid, (id, endsAt) -> shortened(endsAt, now, reduction, changed));
+        }
+        return changed[0];
+    }
+
+    private static Long shortened(Long endsAt, long now, long reduction, boolean[] changed) {
+        if (endsAt == null || endsAt <= now) return endsAt;
+        changed[0] = true;
+        return Math.max(now, endsAt - reduction);
+    }
+
+    /**
      * Atomically claims a cooldown: returns {@code true} only if the player was
      * free and the cooldown is now set. Check-then-set in one operation so two
      * concurrent casts cannot both pass an {@link #isOnCooldown(UUID, String)}

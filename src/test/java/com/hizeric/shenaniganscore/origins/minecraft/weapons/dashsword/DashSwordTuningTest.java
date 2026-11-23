@@ -41,6 +41,7 @@ class DashSwordTuningTest {
                       cooldown: 55
                 """);
         assertEquals(55, DashSwordItem.cooldownSeconds());
+        assertEquals(55, DashSwordAbility.definition().cooldownSeconds());
         String lore = String.join("\n", DashSwordItem.lore());
         assertTrue(lore.contains("55s cooldown"), "expected tuned cooldown in lore: " + lore);
         assertFalse(lore.contains("6s cooldown"), "stale 6s lore must be gone: " + lore);
@@ -50,6 +51,7 @@ class DashSwordTuningTest {
     void missingEntryUsesTheShippedDefault() throws IOException {
         load("config-version: 1\n");
         assertEquals(30, DashSwordItem.cooldownSeconds());
+        assertEquals(30, DashSwordAbility.definition().cooldownSeconds());
         assertTrue(String.join("\n", DashSwordItem.lore()).contains("30s cooldown"));
     }
 }
