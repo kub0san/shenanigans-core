@@ -28,7 +28,7 @@ interface:
 # with a SEVERE log instead of blocking joins.
 resource-pack:
   enabled: true
-  port: 8123
+  port: 34367
   host: ""
 
 # Technique cast flourish (particles + sound). Domain expansions are unaffected.

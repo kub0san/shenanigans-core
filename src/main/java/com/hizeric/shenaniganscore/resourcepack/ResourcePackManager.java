@@ -68,7 +68,7 @@ public final class ResourcePackManager implements Listener {
         }
         sha1 = sha1(zip);
         UUID id = UUID.nameUUIDFromBytes("shenanigans-resource-pack".getBytes(StandardCharsets.UTF_8));
-        int port = plugin.getConfig().getInt("resource-pack.port", 8123);
+        int port = plugin.getConfig().getInt("resource-pack.port", 34367);
 
         // A required pack whose URL is unreachable by clients disconnects every
         // remote player. Resolve/validate first and disable the pack (rather than
