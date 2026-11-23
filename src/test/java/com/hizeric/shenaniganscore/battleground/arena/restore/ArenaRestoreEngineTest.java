@@ -48,6 +48,14 @@ class ArenaRestoreEngineTest {
     private static final ArenaRestoreEngine.StateProbe STONE =
             (world, x, y, z) -> "minecraft:stone";
 
+    /** Counts every cell probe while delegating to STONE, for bounded-vs-exhaustive assertions. */
+    private static ArenaRestoreEngine.StateProbe counting(int[] calls) {
+        return (world, x, y, z) -> {
+            calls[0]++;
+            return STONE.at(world, x, y, z);
+        };
+    }
+
     @SuppressWarnings("unchecked")
     private static World fakeWorld() {
         return (World) Proxy.newProxyInstance(ArenaRestoreEngineTest.class.getClassLoader(),
@@ -427,8 +435,10 @@ class ArenaRestoreEngineTest {
     @Test
     void fullChunkFallbackIsBoundedAndRequeues() {
         Fixture fx = new Fixture();
+        // Index 4 of the 256-cell chunk: on the bounded sample's stride-4 grid (issue #5), so the
+        // dirty sample still falls through to CHUNK_SCAN and the fallback escalation is exercised.
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
-                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+                (x == 4 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
         ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER, unloggedProbe);
         Set<Long> ledger = set(
                 BlockKey.pack(2, 60, 1), BlockKey.pack(4, 60, 1),
@@ -462,8 +472,9 @@ class ArenaRestoreEngineTest {
     void tierOneUnloggedDiscrepancyEscalatesWithoutBlockingGate() {
         Fixture fx = new Fixture();
         int[] gateCalls = {0};
+        // On the bounded sample grid (index 4) and off-ledger, so the dirty sample still escalates.
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
-                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+                (x == 4 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
         ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER,
                 unloggedProbe, () -> gateCalls[0]++);
         long tierOne = BlockKey.pack(0, 60, 0); // sampled grid surface -> tier-1 essential
@@ -496,8 +507,9 @@ class ArenaRestoreEngineTest {
     void tierOneUnloggedDiscrepancyDiagnosticOnlyWhenFallbackDisabled() {
         Fixture fx = new Fixture();
         int[] gateCalls = {0};
+        // On the bounded sample grid (index 4) and off-ledger, so the dirty sample is still detected.
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
-                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+                (x == 4 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
         ArenaRestoreEngine engine = engine(fx, policy(4, true, false), SYNC, OK_LOADER,
                 unloggedProbe, () -> gateCalls[0]++);
         long tierOne = BlockKey.pack(0, 60, 0);
@@ -524,8 +536,9 @@ class ArenaRestoreEngineTest {
     void tierOneDiscrepancyAfterCancelTierTwoDoesNotStallRestore() {
         Fixture fx = new Fixture();
         int[] gateCalls = {0};
+        // On the bounded sample grid (index 4) and off-ledger, so the dirty sample is still detected.
         ArenaRestoreEngine.StateProbe unloggedProbe = (world, x, y, z) ->
-                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+                (x == 4 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
         ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER,
                 unloggedProbe, () -> gateCalls[0]++);
         long tierOne = BlockKey.pack(0, 60, 0); // sampled grid surface -> tier-1 essential
@@ -805,8 +818,10 @@ class ArenaRestoreEngineTest {
     /** Non-empty ledgers keep the distinct-position formula; fallback writes cannot inflate it. */
     @Test void nonEmptyLedgerIgnoresWorkAccountingAndFallbackWrites() {
         Fixture fx = new Fixture();
+        // Index 8 of the 512-cell (two-layer) chunk: on the bounded sample grid, so snapshot
+        // fallback still happens and the "fallback writes cannot inflate progress" claim is real.
         ArenaRestoreEngine.StateProbe unlogged = (w, x, y, z) ->
-                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+                (x == 8 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
         ArenaRestoreEngine engine = engine(fx, policy(4, true, true), SYNC, OK_LOADER, unlogged);
         Set<Long> ledger = set(BlockKey.pack(2, 60, 1), BlockKey.pack(4, 60, 1),
                 BlockKey.pack(5, 60, 1), BlockKey.pack(7, 60, 1));
@@ -861,5 +876,99 @@ class ArenaRestoreEngineTest {
         drive(engine);
         assertFalse(engine.isRestoring());
         assertEquals(100, engine.progressPercent());
+    }
+
+    // ------------------------------------------------ committed-diff bounded verification (issue #5)
+
+    /** A committed diff trusts its ledger: a bounded sample replaces the 4096-cell exhaustive scan. */
+    @Test
+    void committedDiffUsesBoundedSampleInsteadOfFullScan() {
+        Fixture fx = new Fixture();
+        int[] probeCalls = {0};
+        ArenaRestoreEngine engine = engine(fx, policy(2, true, false), SYNC, OK_LOADER,
+                counting(probeCalls));
+        Set<Long> ledger = new LinkedHashSet<>();
+        for (int cz = 0; cz < 4; cz++) {
+            for (int cx = 0; cx < 4; cx++) {
+                ledger.add(BlockKey.pack(cx * 16 + 1, 60, cz * 16 + 1));
+            }
+        }
+        assertEquals(16, ledger.size(), "one ledger cell per chunk of stoneChunks(60,60,63,63)");
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(ledger),
+                stoneChunks(60, 60, 63, 63))); // 16 chunks x 256 cells = 4096
+        drive(engine);
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(ledger, Set.copyOf(fx.writes));
+        assertEquals(ledger.size(), fx.writes.size(), "each ledger position written exactly once");
+        assertEquals(16, engine.verifiedChunks());
+        assertTrue(probeCalls[0] <= 16 * ArenaVerification.CHEAP_SAMPLE_CELLS,
+                "probes must be bounded by 16 x " + ArenaVerification.CHEAP_SAMPLE_CELLS
+                        + ", was " + probeCalls[0]);
+        assertTrue(probeCalls[0] < 4096 / 2,
+                "a committed diff must not scan the whole 4096-cell region, was " + probeCalls[0]);
+    }
+
+    /** A committed, empty ledger needs no comparison at all: zero probes, 16 verified chunks. */
+    @Test
+    void committedDiffEmptyLedgerFinishesWithoutScanning() {
+        Fixture fx = new Fixture();
+        int[] probeCalls = {0};
+        ArenaRestoreEngine engine = engine(fx, policy(2, true, false), SYNC, OK_LOADER,
+                counting(probeCalls));
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(Set.of()),
+                stoneChunks(60, 60, 63, 63)));
+        drive(engine);
+
+        assertEquals(0, probeCalls[0], "a committed empty ledger must probe no cell");
+        assertEquals(16, engine.verifiedChunks());
+        assertFalse(engine.isRestoring());
+        assertEquals(100, engine.progressPercent());
+    }
+
+    /** An unflushed ledger is never trusted: it still forces the exhaustive 4096-cell scan. */
+    @Test
+    void unflushedDiffStillUsesExhaustiveScan() {
+        Fixture fx = new Fixture();
+        int[] probeCalls = {0};
+        ArenaRestoreEngine engine = engine(fx, policy(2, false, false), SYNC, OK_LOADER,
+                counting(probeCalls));
+        DiffLog.Decoded unflushed =
+                new DiffLog.Decoded("ffa", 1L, false, Set.of(), "unflushed round");
+
+        assertTrue(engine.beginRestore(region(), "ffa", unflushed,
+                stoneChunks(60, 60, 63, 63)));
+        drive(engine);
+
+        assertTrue(probeCalls[0] >= 4096,
+                "an unflushed ledger forces a full 4096-cell scan, was " + probeCalls[0]);
+        assertEquals(16, engine.verifiedChunks());
+        assertFalse(engine.isRestoring());
+    }
+
+    /** The bounded sample never leaves ledger cells unwritten; no player injection is involved. */
+    @Test
+    void committedDiffFastPathWritesAllCells() {
+        Fixture fx = new Fixture();
+        int[] probeCalls = {0};
+        ArenaRestoreEngine engine = engine(fx, policy(2, true, false), SYNC, OK_LOADER,
+                counting(probeCalls));
+        Set<Long> ledger = set(
+                BlockKey.pack(1, 60, 1), BlockKey.pack(2, 60, 1),
+                BlockKey.pack(10, 60, 10), BlockKey.pack(11, 60, 10));
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(ledger),
+                stoneChunks(60, 60, 63, 63)));
+        drive(engine);
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(ledger, Set.copyOf(fx.writes));
+        assertEquals(ledger.size(), fx.writes.size(), "each cell written exactly once");
+        assertTrue(probeCalls[0] <= 16 * ArenaVerification.CHEAP_SAMPLE_CELLS,
+                "probes must stay bounded, was " + probeCalls[0]);
     }
 }

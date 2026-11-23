@@ -235,6 +235,12 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         untrusted.clear();
         scans.clear();
 
+        if (logger != null && diff.complete() && deps.policy().get().verify()) {
+            logger.info("Arena restore: committed diff for map '" + mapId + "' round "
+                    + diff.roundId() + " uses a bounded " + ArenaVerification.CHEAP_SAMPLE_CELLS
+                    + "-cell-per-chunk trusted-diff sample instead of an exhaustive cell scan.");
+        }
+
         Set<Long> essentials = TierOnePlanner.select(diff.positions(), snapshot);
         Map<ChunkPos, List<Long>> tierOneByChunk = groupByChunk(essentials);
         for (Map.Entry<ChunkPos, List<Long>> entry : tierOneByChunk.entrySet()) {
@@ -453,6 +459,25 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         boolean escalateToSnapshot = false;
         // An unflushed ledger is untrustworthy even when the verify toggle is off.
         boolean mustVerify = policy.verify() || (diff != null && !diff.complete());
+        if (mustVerify && !verified.contains(dispatch.pos())) {
+            if (diff != null && diff.complete() && diff.positions().isEmpty()) {
+                // A committed, empty ledger is authoritative: nothing to compare, so no probes.
+                scans.remove(dispatch.pos());
+                verified.add(dispatch.pos());
+            } else if (diff != null && diff.complete() && policy.verify()) {
+                Set<Long> sampled = ArenaVerification.sampledUnloggedChunk(snapshot, dispatch.pos(),
+                        (x, y, z) -> deps.stateProbe().at(world, x, y, z),
+                        diff.positions(), ArenaVerification.CHEAP_SAMPLE_CELLS);
+                if (sampled.isEmpty()) {
+                    // Committed ledger is authoritative for this chunk: no anomaly observed.
+                    scans.remove(dispatch.pos());
+                    verified.add(dispatch.pos());
+                } else {
+                    // Task 3: one-shot escalation warning, then fall through to the exhaustive scan.
+                }
+            }
+        }
+
         if (mustVerify && !verified.contains(dispatch.pos())) {
             ChunkScan scan = scans.computeIfAbsent(dispatch.pos(),
                     pos -> new ChunkScan(snapshot, pos));
