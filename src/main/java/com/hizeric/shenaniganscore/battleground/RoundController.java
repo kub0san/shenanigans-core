@@ -141,9 +141,8 @@ final class RoundController {
     }
 
     private void tickClock() {
-        // Tier 2 may continue while the gate is open (RUNNING). Only stage/restoring rounds
-        // must not advance the clock; that state is blocked at the deploy gate, but the old
-        // 1-tick task also checked it here, so keep the guard.
+        // Issue #7: deploy opens only after the full restore completes, so STAGING and
+        // RESTORING must not advance the clock; the guard stays.
         if (!isRunningLike()) return;
 
         // The clock pauses whenever nobody is deployed: time spent shopping or editing in the
@@ -169,8 +168,8 @@ final class RoundController {
 
     void beginReset() {
         if (m.restoreEngine != null && m.restoreEngine.isRestoring()) {
-            // Tier 2 continues while the round is RUNNING/WARNING; cancel it so the new reset can
-            // take over. A STAGING/tier-1 restore must not be interrupted.
+            // Issue #7: tier 2 is complete by the time deploy opens; cancel any residual writes
+            // so the new reset can take over. A STAGING/tier-1 restore must not be interrupted.
             if (!isRunningLike()) return;
             m.restoreEngine.cancelTierTwo();
         }
@@ -196,8 +195,7 @@ final class RoundController {
             m.inventories.replace(uuid, new ArenaInventories.Snapshot(
                     player.getInventory().getContents(), player.getItemOnCursor()));
             m.staging.enter(player);
-            // Evacuate staged players out of the arena footprint so the restore's near-player
-            // deferral cannot stall the rebuild (and so blocks are not written under them).
+            // Evacuate staged players out of the arena footprint so nothing is written under them.
             ArenaRegion evacRegion = m.arenaStore.region();
             Location evacDest = evacuationDestination(player, evacRegion);
             if (evacDest == null || !player.teleport(evacDest)) {
