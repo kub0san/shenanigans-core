@@ -33,6 +33,7 @@ import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
 import com.hizeric.shenaniganscore.core.cooldown.CooldownManager;
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
 import com.hizeric.shenaniganscore.core.config.ConfigAutoUpdater;
+import com.hizeric.shenaniganscore.core.display.CameraShake;
 import com.hizeric.shenaniganscore.battleground.shop.ShopPolicyConfig;
 import com.hizeric.shenaniganscore.core.domain.DomainRegistry;
 import com.hizeric.shenaniganscore.core.domain.DomainRegionGuard;
@@ -369,6 +370,9 @@ public final class ShenanigansCore extends JavaPlugin {
             GuiScreen.clearRequired();
         });
         runSafely("domain claims", () -> DomainRegistry.get().clearAll());
+        // A reload mid-shake would otherwise cancel the driver task and leave the player's
+        // rotation stuck at the last shaken yaw/pitch until relog.
+        runSafely("camera shake", () -> CameraShake.restoreAll());
         // Only touch the WorldEdit bridge when the provider is actually present; loading the
         // bridge class while WorldEdit is absent would crash a plugin-less shutdown (F-37).
         runSafely("worldedit bridge", () -> {

@@ -20,6 +20,7 @@ import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -91,9 +92,9 @@ public final class ExecutionerSwordEffect {
 
     // ================================================================== uppercut timeline
 
-    private static final org.bukkit.block.data.BlockData BLADE_CORE =
+    private static final BlockData BLADE_CORE =
             Material.WHITE_CONCRETE.createBlockData();
-    private static final org.bukkit.block.data.BlockData BLADE_GLOW =
+    private static final BlockData BLADE_GLOW =
             Material.RED_STAINED_GLASS.createBlockData();
     private static final Particle.DustOptions CRIMSON_DUST =
             new Particle.DustOptions(Color.fromRGB(150, 0, 12), 1.2f);
@@ -200,9 +201,9 @@ public final class ExecutionerSwordEffect {
                 }
             }
 
-            // ── Cross accent: fade/remove by tick 6 ──
-            if (tick >= 4) {
-                fadeCross(tick);
+            // ── Cross accent: shrink away just after the sweep ──
+            if (tick == 4) {
+                for (BlockDisplay bd : crossBlades) BlockDisplayOps.shrink(bd, 2);
             }
 
             tick++;
@@ -255,24 +256,11 @@ public final class ExecutionerSwordEffect {
             poseLayer(g, chest, dir, 0.9, 0.25f);
         }
 
-        private void fadeCross(int t) {
-            float f = 1.0f - (t - 4) / 2.0f; // 1.0 at t4 → 0.0 at t6
-            if (f < 0.02f) f = 0.02f;
-            for (BlockDisplay bd : crossBlades) {
-                if (bd == null || !bd.isValid()) continue;
-                org.bukkit.util.Transformation tr = bd.getTransformation();
-                Vector3f s = new Vector3f(tr.getScale()).mul(f);
-                bd.setInterpolationDelay(0);
-                bd.setInterpolationDuration(1);
-                bd.setTransformation(new org.bukkit.util.Transformation(
-                        new Vector3f(tr.getTranslation()),
-                        tr.getLeftRotation(),
-                        s,
-                        tr.getRightRotation()));
-            }
-        }
+
 
         private void cleanup() {
+            // The shake outlives the effect otherwise; restore it even on an early abort.
+            CameraShake.restore(caster);
             if (core != null && core.isValid()) core.remove();
             if (glow != null && glow.isValid()) glow.remove();
             core = null;
@@ -398,6 +386,10 @@ public final class ExecutionerSwordEffect {
                 for (BlockDisplay g : bladeGlows) discard(g);
                 bladeCores.clear();
                 bladeGlows.clear();
+                discard(cutCore);
+                discard(cutGlow);
+                cutCore = null;
+                cutGlow = null;
                 lightBurst(1.2);
                 SoundUtils.play(anchor.clone(), Sound.BLOCK_ANVIL_LAND, 0.9f, 0.8f);
             }
@@ -586,7 +578,9 @@ public final class ExecutionerSwordEffect {
         }
 
         private void animateVerdict() {
-            double elapsed = (tick - 14) / 20.0;
+            // TitleAnimator reveals ~0.12s per glyph; compress the reveal to fit the 10-tick
+            // verdict window (t14..23) instead of showing only "FINA".
+            double elapsed = (tick - 14) * 0.22;
             boolean last = tick >= 22;
             var title = TitleAnimator.build("FINAL VERDICT", "終末の裁き", "Final Verdict", elapsed, last);
             caster.showTitle(title);
