@@ -473,7 +473,16 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                     scans.remove(dispatch.pos());
                     verified.add(dispatch.pos());
                 } else {
-                    // Task 3: one-shot escalation warning, then fall through to the exhaustive scan.
+                    // PR #2's rule: an observed discrepancy is never written over without a full
+                    // comparison and, when enabled, snapshot fallback. Escalate this chunk to the
+                    // resumable exhaustive scan below; do not write until that verdict is in.
+                    // Once per chunk only: scans holds an entry while a resumable scan is in
+                    // progress, so later slices of the same chunk must not re-log the warning.
+                    if (logger != null && !scans.containsKey(dispatch.pos())) {
+                        logger.warning("Arena restore: chunk " + dispatch.pos()
+                                + " failed the bounded trusted-diff check (" + sampled.size()
+                                + " sampled discrepancy/ies); switching to the exhaustive scan before any write.");
+                    }
                 }
             }
         }

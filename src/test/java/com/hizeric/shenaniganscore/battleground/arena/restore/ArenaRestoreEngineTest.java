@@ -27,6 +27,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -128,6 +131,40 @@ class ArenaRestoreEngineTest {
         final List<Long> writes = new ArrayList<>();
         final List<Long> physics = new ArrayList<>();
         final Deque<Runnable> tasks = new ArrayDeque<>();
+    }
+
+    /** Captures WARNING records so the one-shot escalation log can be asserted. */
+    private static final class WarningCollector extends Handler {
+        final List<LogRecord> warnings = new ArrayList<>();
+
+        @Override public void publish(LogRecord record) {
+            if (record.getLevel().intValue() >= Level.WARNING.intValue()) warnings.add(record);
+        }
+        @Override public void flush() { }
+        @Override public void close() { }
+    }
+
+    private static List<String> escalationWarnings(WarningCollector collector) {
+        return collector.warnings.stream()
+                .map(LogRecord::getMessage)
+                .filter(message -> message.contains("bounded trusted-diff check"))
+                .toList();
+    }
+
+    /** Engine with a caller-supplied logger and probe, for the sampled-anomaly warning tests. */
+    private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
+                                             ArenaRestoreEngine.StateProbe probe, Logger logger,
+                                             Runnable onTierOneComplete) {
+        Deps deps = new Deps(OK_LOADER, SYNC,
+                (world, packed, state, physics) -> fx.writes.add(packed),
+                probe, () -> policy,
+                new TicketLedger<>(key -> { }, key -> { }), WORLD);
+        return new ArenaRestoreEngine(deps, logger, onTierOneComplete, () -> 0L);
+    }
+
+    private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
+                                             ArenaRestoreEngine.StateProbe probe, Logger logger) {
+        return engine(fx, policy, probe, logger, null);
     }
 
     private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
@@ -970,5 +1007,160 @@ class ArenaRestoreEngineTest {
         assertEquals(ledger.size(), fx.writes.size(), "each cell written exactly once");
         assertTrue(probeCalls[0] <= 16 * ArenaVerification.CHEAP_SAMPLE_CELLS,
                 "probes must stay bounded, was " + probeCalls[0]);
+    }
+
+    // ------------------------------------------ sampled anomaly -> exhaustive escalation (task 3)
+
+    /** A dirty trusted-diff sample escalates to the whole-chunk scan and snapshot fallback. */
+    @Test
+    void sampledAnomalyFallsBackToExhaustiveScanAndSnapshot() {
+        Fixture fx = new Fixture();
+        int[] probeCalls = {0};
+        Logger logger = Logger.getLogger("sampledAnomalyFallsBackToExhaustiveScanAndSnapshot");
+        WarningCollector warnings = new WarningCollector();
+        logger.addHandler(warnings);
+        logger.setUseParentHandlers(false);
+        try {
+            ArenaRestoreEngine.StateProbe dirty = (w, x, y, z) -> {
+                probeCalls[0]++;
+                // Index 0 of the 256-cell chunk: on the sample grid and off the ledger.
+                return (x == 0 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
+            };
+            ArenaRestoreEngine engine = engine(fx, policy(4, true, true), dirty, logger);
+            long ledgerPosition = BlockKey.pack(1, 60, 1);
+            ArenaSnapshot snapshot = stoneChunks(60, 60, 15, 15);
+
+            assertTrue(engine.beginRestore(region(), "ffa", diff(set(ledgerPosition)), snapshot));
+            drive(engine);
+
+            assertFalse(engine.isRestoring());
+            assertFalse(engine.restoreFailed());
+            assertEquals(1, engine.untrustedChunks());
+            assertTrue(probeCalls[0] > ArenaVerification.CHEAP_SAMPLE_CELLS,
+                    "an observed sample anomaly must reach the exhaustive scan, probes=" + probeCalls[0]);
+            assertEquals(ArenaVerification.positionsOf(snapshot, new ChunkPos(0, 0)).size(),
+                    fx.writes.stream().distinct().count(), "whole-chunk fallback must cover every cell");
+            List<String> escalation = escalationWarnings(warnings);
+            assertEquals(1, escalation.size(), "one-shot escalation warning, was " + escalation);
+            assertEquals("Arena restore: chunk " + new ChunkPos(0, 0)
+                            + " failed the bounded trusted-diff check (1 sampled discrepancy/ies); "
+                            + "switching to the exhaustive scan before any write.",
+                    escalation.get(0), "exact escalation message");
+        } finally {
+            logger.removeHandler(warnings);
+        }
+    }
+
+    /** With fallback disabled the dirty sample still escalates to the scan, but writes only the ledger. */
+    @Test
+    void sampledAnomalyWithFallbackDisabledIsDiagnosticOnly() {
+        Fixture fx = new Fixture();
+        Logger logger = Logger.getLogger("sampledAnomalyWithFallbackDisabledIsDiagnosticOnly");
+        WarningCollector warnings = new WarningCollector();
+        logger.addHandler(warnings);
+        logger.setUseParentHandlers(false);
+        try {
+            ArenaRestoreEngine.StateProbe dirty = (w, x, y, z) ->
+                    (x == 0 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
+            ArenaRestoreEngine engine = engine(fx, policy(4, true, false), dirty, logger);
+            long ledgerPosition = BlockKey.pack(1, 60, 1);
+
+            assertTrue(engine.beginRestore(region(), "ffa", diff(set(ledgerPosition)),
+                    stoneChunks(60, 60, 15, 15)));
+            drive(engine);
+
+            assertFalse(engine.isRestoring());
+            assertFalse(engine.restoreFailed());
+            assertEquals(1, engine.untrustedChunks());
+            assertEquals(Set.of(ledgerPosition), Set.copyOf(fx.writes), "no snapshot escalation");
+            assertEquals(1, fx.writes.size(), "no duplicate writes");
+            assertEquals(1, escalationWarnings(warnings).size(),
+                    "the scan is still entered, so the warning is still one-shot");
+        } finally {
+            logger.removeHandler(warnings);
+        }
+    }
+
+    /** A dirty sample in a tier-1 chunk must not hold the deployment gate open. */
+    @Test
+    void sampledAnomalyOnTierOneChunkDoesNotBlockGate() {
+        Fixture fx = new Fixture();
+        int[] gateCalls = {0};
+        // Index 4 of the sample grid, off the tier-1 ledger cell at (0,60,0).
+        ArenaRestoreEngine.StateProbe dirty = (w, x, y, z) ->
+                (x == 4 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, true), dirty, LOG, () -> gateCalls[0]++);
+        long tierOne = BlockKey.pack(0, 60, 0);
+        ArenaSnapshot snapshot = stoneChunks(60, 60, 15, 15);
+        int chunkPositions = ArenaVerification.positionsOf(snapshot, new ChunkPos(0, 0)).size();
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(tierOne)), snapshot));
+        engine.restoreStep(null);
+
+        assertEquals(1, gateCalls[0], "tier-1 gate fires on the tier-1 slice");
+        assertTrue(engine.isRestoring(), "escalated tier-2 snapshot work is still pending");
+        assertEquals(1, engine.untrustedChunks());
+
+        drive(engine);
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(1, gateCalls[0], "gate must not refire");
+        assertEquals(chunkPositions, fx.writes.stream().distinct().count());
+        assertEquals(chunkPositions, fx.writes.size(), "no position written twice");
+    }
+
+    /** A tier-2 boundary cancel after a dirty sample still finishes, with the warning one-shot. */
+    @Test
+    void sampledAnomalyAfterCancelTierTwoDoesNotStall() {
+        Fixture fx = new Fixture();
+        int[] gateCalls = {0};
+        Logger logger = Logger.getLogger("sampledAnomalyAfterCancelTierTwoDoesNotStall");
+        WarningCollector warnings = new WarningCollector();
+        logger.addHandler(warnings);
+        logger.setUseParentHandlers(false);
+        try {
+            ArenaRestoreEngine.StateProbe dirty = (w, x, y, z) ->
+                    (x == 4 && y == 60 && z == 0) ? "minecraft:dirt" : "minecraft:stone";
+            ArenaRestoreEngine engine = engine(fx, policy(4, true, true), dirty, logger,
+                    () -> gateCalls[0]++);
+            long tierOne = BlockKey.pack(0, 60, 0);
+
+            assertTrue(engine.beginRestore(region(), "ffa", diff(set(tierOne)),
+                    stoneChunks(60, 60, 15, 15)));
+            engine.cancelTierTwo();
+            drive(engine);
+
+            assertFalse(engine.isRestoring(), "cancelled tier-2 escalation must not stall restore");
+            assertFalse(engine.restoreFailed());
+            assertEquals(1, gateCalls[0]);
+            assertEquals(1, engine.untrustedChunks(), "discrepancy is still detected");
+            assertEquals(Set.of(tierOne), Set.copyOf(fx.writes),
+                    "cancelled tier-2 must not be re-enqueued by the escalation");
+            assertEquals(1, fx.writes.size(), "no duplicate writes");
+            assertEquals(1, escalationWarnings(warnings).size(), "one-shot warning survives cancel");
+        } finally {
+            logger.removeHandler(warnings);
+        }
+    }
+
+    /** A stale snapshot with a committed diff is still checked chunk by chunk and escalated. */
+    @Test
+    void staleSnapshotWithCompleteDiffStillEscalatesChunk() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine.StateProbe allDirt = (w, x, y, z) -> "minecraft:dirt";
+        ArenaRestoreEngine engine = engine(fx, policy(4, true, true), allDirt, LOG);
+        ArenaSnapshot snapshot = stoneChunks(60, 60, 31, 15); // two chunks
+        long ledgerPosition = BlockKey.pack(1, 60, 1);
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(set(ledgerPosition)), snapshot));
+        drive(engine);
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(2, snapshot.chunkPositions().size(), "fixture spans two chunks");
+        assertEquals(snapshot.chunkPositions().size(), engine.untrustedChunks());
+        assertEquals(2 * ArenaVerification.positionsOf(snapshot, new ChunkPos(0, 0)).size(),
+                fx.writes.stream().distinct().count(), "both stale chunks are fully restored");
     }
 }
