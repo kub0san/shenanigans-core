@@ -1,18 +1,25 @@
 # shenanigans-core
 
-A Paper PvP plugin built around four Jujutsu Kaisen Domain Expansions and six standalone techniques, played in an arena-style battleground.
+A Paper PvP plugin that collects popular abilities, items and concepts from series we like into one
+arena-mode playground. It's a personal project for a personal server — made for PvP shenanigans,
+not meant to be taken seriously or balanced.
+
+Today the plugin ships one origin: Jujutsu Kaisen (four Domain Expansions and six techniques).
+The plan is to grow it into a multi-origin collection — Terraria-based content and other series
+are next. An "origin" is simply a series the plugin draws from.
 
 ## Features
 
-- **Domains:** Malevolent Shrine (open), Unlimited Void, Time Cell Moon Palace, Womb Profusion (closed)
-- **Techniques:** Fuga, Red, Blue, Purple, Piercing Blood, World Slash — cast with `/ability 1|2|3`
+- **Origins:** Jujutsu Kaisen is implemented today; Terraria and other series are planned
+- **Domains (JJK):** Malevolent Shrine (open), Unlimited Void, Time Cell Moon Palace, Womb Profusion (closed)
+- **Techniques (JJK):** Fuga, Red, Blue, Purple, Piercing Blood, World Slash — cast with `/ability 1|2|3`
 - **Arena mode:** capture, loadouts, killstreak shop, protection and restore system
 - **Resource pack:** bundled, self-hosted HUD and ability icons
 
 ## Project layout
 
 - `src/main/java/.../core/` — origin-agnostic utilities (display, sessions, config, particles, network)
-- `src/main/java/.../origins/jujutsukaisen/` — domain expansions and techniques
+- `src/main/java/.../origins/jujutsukaisen/` — the first implemented origin: domains and techniques
 - `src/main/java/.../battleground/` — arena mode, economy, combat, menus and storage
 - `resourcepack/` — the self-hosted client pack (HUD atlas, item models, textures)
 
