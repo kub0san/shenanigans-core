@@ -2,12 +2,14 @@ package com.hizeric.shenaniganscore.battleground.shop;
 
 import com.hizeric.shenaniganscore.battleground.ability.AbilityIdMigration;
 import com.hizeric.shenaniganscore.battleground.item.BattlegroundItemKeys;
-import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordId;
-import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordItem;
-import com.hizeric.shenaniganscore.battleground.storage.Databases;
 import com.hizeric.shenaniganscore.battleground.storage.Database;
+import com.hizeric.shenaniganscore.battleground.storage.Databases;
 import com.hizeric.shenaniganscore.battleground.storage.ShopRepository;
 import com.hizeric.shenaniganscore.battleground.storage.StorageException;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordId;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordItem;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordId;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordItem;
 import com.hizeric.shenaniganscore.core.ability.AbilityDefinition;
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
@@ -108,7 +110,8 @@ public final class ShopCatalog {
     private record SeededItem(String id, AbilityId abilityId, Supplier<ShopEntry> factory) { }
 
     private static final List<SeededItem> SEEDED_ITEMS = List.of(
-            new SeededItem(DashSwordId.NEW_ID, DashSwordItem.ABILITY_ID, DashSwordItem::catalogEntry));
+            new SeededItem(DashSwordId.NEW_ID, DashSwordItem.ABILITY_ID, DashSwordItem::catalogEntry),
+            new SeededItem(ExecutionerSwordId.NEW_ID, ExecutionerSwordItem.ABILITY_ID, ExecutionerSwordItem::catalogEntry));
 
     private static List<ShopEntry> seededItems() {
         return SEEDED_ITEMS.stream().map(item -> item.factory().get()).toList();

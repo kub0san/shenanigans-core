@@ -4,6 +4,8 @@ import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordAbility;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordHitListener;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordAbility;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordHitListener;
 
 /**
  * Registration point for the Minecraft ability catalogue.
@@ -19,5 +21,9 @@ public final class MinecraftAbilities {
     public static void register(AbilityRegistry registry, ShenanigansCore plugin) {
         registry.register(DashSwordAbility.definition());
         plugin.getServer().getPluginManager().registerEvents(new DashSwordHitListener(plugin), plugin);
+
+        ExecutionerSwordHitListener listener = new ExecutionerSwordHitListener();
+        registry.register(ExecutionerSwordAbility.definition(listener));
+        plugin.getServer().getPluginManager().registerEvents(listener, plugin);
     }
 }
