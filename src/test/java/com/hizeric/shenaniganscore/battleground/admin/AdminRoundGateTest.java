@@ -1,7 +1,16 @@
 package com.hizeric.shenaniganscore.battleground.admin;
 
 import com.hizeric.shenaniganscore.battleground.RoundState;
+import com.hizeric.shenaniganscore.battleground.arena.ArenaRuntimeConfig;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,6 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the GUI asks this gate whether an action is allowed and what the manager should execute.
  */
 class AdminRoundGateTest {
+
+    @TempDir
+    Path folder;
+
+    @AfterEach
+    void restoreDefaults() {
+        ArenaRuntimeConfig.load(null, null);
+    }
 
     @Test
     void startIsDeniedWithoutACapturedArena() {
@@ -28,7 +45,26 @@ class AdminRoundGateTest {
 
         assertTrue(result.allowed());
         assertEquals(AdminRoundGate.Effect.START, result.effect());
-        assertEquals(1200, result.seconds());
+        assertEquals(ArenaRuntimeConfig.current().roundDurationSeconds(), result.seconds());
+    }
+
+    @Test
+    void startReturnsTheConfiguredRoundDuration() throws IOException {
+        Path config = folder.resolve("config.yml");
+        Files.writeString(config, """
+                arena:
+                  round:
+                    duration-seconds: 900
+                    warning-seconds: 15
+                    pause-when-empty: true
+                """, StandardCharsets.UTF_8);
+        ArenaRuntimeConfig.load(config.toFile(), Logger.getLogger("test"));
+
+        AdminRoundGate.Result result = AdminRoundGate.decide(
+                AdminRoundGate.Action.START, RoundState.IDLE, true, 0);
+
+        assertTrue(result.allowed());
+        assertEquals(900, result.seconds(), "the gate must return the live configured duration");
     }
 
     @Test

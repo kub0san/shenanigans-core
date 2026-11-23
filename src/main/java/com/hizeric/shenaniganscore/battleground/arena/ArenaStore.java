@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
@@ -77,6 +78,12 @@ public final class ArenaStore {
             }
         }
         maps.load(root);
+        // Resolve persisted arena worlds here (enable / reload), never from the per-move
+        // inWorld() path. A failed create stays retryable: ArenaRegion only marks success.
+        for (String id : maps.mapIds()) {
+            ArenaRegion region = maps.region(id);
+            if (region != null) region.world();
+        }
         prewarmNextMap();
     }
 
@@ -232,20 +239,26 @@ public final class ArenaStore {
         if (root == null) {
             try { root = loader.createNode(); } catch (Exception e) { throw new IllegalStateException(e); }
         }
-        File temp = new File(folder, "arena.yml.tmp");
+        Path temp = null;
         try {
             maps.save(root);
             Files.createDirectories(folder.toPath());
-            YamlConfigurationLoader.builder().file(temp).build().save(root);
+            // A unique temp file prevents two concurrent saves from moving each other's bytes.
+            temp = Files.createTempFile(folder.toPath(), "arena.yml-", ".tmp");
+            YamlConfigurationLoader.builder().file(temp.toFile()).build().save(root);
             try {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
+                Files.move(temp, file.toPath(), StandardCopyOption.REPLACE_EXISTING,
                         StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                Files.move(temp, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
             }
+            temp = null; // committed
         } catch (IOException e) {
             plugin.getLogger().log(Level.SEVERE, "Could not save battleground/arena.yml!", e);
-            temp.delete();
+        } finally {
+            if (temp != null) {
+                try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
+            }
         }
     }
 
@@ -256,8 +269,12 @@ public final class ArenaStore {
     }
 
     private static String normalizeMapId(String mapId) {
-        if (mapId == null || mapId.isBlank()) return ArenaSnapshotStore.DEFAULT_MAP_ID;
-        return mapId.trim().toLowerCase(java.util.Locale.ROOT);
+        String normalized = MapIds.normalize(mapId);
+        if (normalized == null || normalized.isEmpty()) return ArenaSnapshotStore.DEFAULT_MAP_ID;
+        if (!MapIds.isValid(normalized)) {
+            throw new IllegalArgumentException("Invalid arena map id: " + mapId);
+        }
+        return normalized;
     }
 
     // Legacy helper used by old code paths; keep for source compatibility.

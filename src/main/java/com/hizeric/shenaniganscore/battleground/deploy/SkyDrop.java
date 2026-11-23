@@ -11,11 +11,13 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -41,6 +43,12 @@ public final class SkyDrop {
     private final DiveService dives;
     private final LiquidContactHandler liquidHandler;
     private final Consumer<Player> abortHandler;
+    // One task and one display set per diver, so player-state cleanup can stop a dive without
+    // waiting for its animation to run to completion. The player handle lets cancel() undo the
+    // physical state begin() changed, even when the task has already stopped (e.g. finish()).
+    private final Map<UUID, BukkitTask> tasks = new HashMap<>();
+    private final Map<UUID, Map<Display, Long>> displaysByUuid = new HashMap<>();
+    private final Map<UUID, Player> players = new HashMap<>();
 
     public SkyDrop(Plugin plugin, DiveService dives, LiquidContactHandler liquidHandler,
                    Consumer<Player> abortHandler) {
@@ -48,6 +56,42 @@ public final class SkyDrop {
         this.dives = dives;
         this.liquidHandler = liquidHandler;
         this.abortHandler = abortHandler;
+        // Registration seam: DiveService.clear(UUID) / clear() call back into cancel without
+        // BattlegroundManager having to wire the two collaborators together after construction.
+        if (dives != null) dives.attach(this);
+    }
+
+    /**
+     * Stops one player's dive: cancels its scheduler task, removes its displays, restores the
+     * gravity and fall-distance state changed by {@link #begin}, and releases the dive lock.
+     * Idempotent, and safe to call from {@link DiveService#clear(UUID)} as well as from cleanup
+     * paths that call this directly. Velocity is deliberately left untouched: the natural landing
+     * path ({@code finish(true)}) preserves momentum across the {@code dives.clear(uuid)} callback.
+     */
+    public void cancel(UUID uuid) {
+        if (uuid == null) return;
+        BukkitTask task = tasks.remove(uuid);
+        if (task != null) task.cancel();
+        Map<Display, Long> displays = displaysByUuid.remove(uuid);
+        if (displays != null) {
+            for (Display display : displays.keySet()) display.remove();
+            displays.clear();
+        }
+        Player player = players.remove(uuid);
+        if (player != null && player.isOnline()) {
+            player.setGravity(true);
+            player.setFallDistance(0f);
+        }
+        // clear(UUID) drops the flag before calling back here; the guard also breaks the loop
+        // when cancel(UUID) is the entry point instead.
+        if (dives.isDiving(uuid)) dives.clear(uuid);
+    }
+
+    /** Used by {@link DiveService#clear()} so every tracked dive goes through {@link #cancel(UUID)}. */
+    void cancelAll() {
+        for (UUID uuid : new ArrayList<>(tasks.keySet())) cancel(uuid);
+        for (UUID uuid : new ArrayList<>(displaysByUuid.keySet())) cancel(uuid);
+        for (UUID uuid : new ArrayList<>(players.keySet())) cancel(uuid);
     }
 
     /**
@@ -56,30 +100,41 @@ public final class SkyDrop {
      *              velocity at all.
      */
     public void begin(Player player, Location start, int groundY) {
+        final UUID uuid = player == null ? null : player.getUniqueId();
+        // Evict a stale dive on every begin path, including an invalid start: otherwise its task,
+        // displays and gravity-off state would be orphaned when the guard below aborts.
+        if (uuid != null) cancel(uuid);
         if (player == null || start == null || start.getWorld() == null) {
             if (player != null && abortHandler != null && player.isOnline()) abortHandler.accept(player);
             return;
         }
         final World world = start.getWorld();
-        final UUID uuid = player.getUniqueId();
         final double gx = start.getX();
         final double gz = start.getZ();
         final DropProbe probe = new BukkitDropProbe(world);
 
+        final Map<Display, Long> despawnAtTick = new HashMap<>();
+        displaysByUuid.put(uuid, despawnAtTick);
+        players.put(uuid, player);
         dives.mark(uuid);
         player.setGravity(false);
         player.setFallDistance(0f);
         player.setVelocity(new Vector(0, 0, 0));
 
-        new BukkitRunnable() {
+        BukkitRunnable runnable = new BukkitRunnable() {
             int tick = 0;
             int diveTick = 0;
             Phase phase = Phase.LOCK;
             Location last = start.clone();
-            final Map<Display, Long> despawnAtTick = new HashMap<>();
 
             @Override
             public void run() {
+                // The diving flag is the single source of truth: a cleared dive never ticks again,
+                // even if a scheduler callback was already queued when cleanup happened.
+                if (!dives.isDiving(uuid)) {
+                    SkyDrop.this.cancel(uuid);
+                    return;
+                }
                 if (!player.isOnline() || player.isDead() || player.getWorld() != world) {
                     finish(false);
                     cancel();
@@ -177,7 +232,8 @@ public final class SkyDrop {
                 for (Display display : despawnAtTick.keySet()) display.remove();
                 despawnAtTick.clear();
             }
-        }.runTaskTimer(plugin, 1L, 1L);
+        };
+        tasks.put(uuid, runnable.runTaskTimer(plugin, 1L, 1L));
     }
 
     /** True when a non-air block sits in the next few blocks of the descent column. */

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Pure codec tests: no server, no Bukkit, no files. */
@@ -111,6 +112,15 @@ class ArenaSnapshotCodecTest {
 
         assertArrayEquals(ArenaSnapshotCodec.encode(first), ArenaSnapshotCodec.encode(reordered));
         assertEquals("minecraft:stone", decoded.stateAt(0, 0, 0));
+    }
+
+    @Test
+    void constructorRejectsBoundsWhoseCellCountOverflowsInt() {
+        assertThrows(IllegalArgumentException.class, () -> snapshot(0, 0, 0,
+                100_000, 100_000, 100_000, List.of("minecraft:air"), Map.of()));
+        assertThrows(IllegalArgumentException.class,
+                () -> ArenaSnapshot.cellCount(0, Integer.MIN_VALUE, 0,
+                        0, Integer.MAX_VALUE, 0, 0, 0));
     }
 
     @Test

@@ -27,8 +27,6 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 
-import java.util.UUID;
-
 /** Enforces the staged state and the dive lock through one shared lock predicate. */
 public final class BattlegroundListener implements Listener {
 
@@ -124,21 +122,11 @@ public final class BattlegroundListener implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
-        Player joined = event.getPlayer();
-        // Repairs flags leaked by an earlier session (or by a plugin removed while the player was staged).
-        manager().repair(joined);
-        // Staging hides a player only from those online at the time. A late joiner must not see
-        // someone hovering at the staging anchor.
-        // Scaling boundary: this is O(staged players) per join and repeats hidePlayer for every
-        // viewer already recorded. Acceptable at the current arena size; if staged rosters grow
-        // past ~40, replace stagedUuids() with a reverse viewer index in StagingController.
-        for (UUID uuid : manager().staging().stagedUuids()) {
-            Player staged = Bukkit.getPlayer(uuid);
-            if (staged != null && !staged.equals(joined)) {
-                joined.hidePlayer(plugin, staged);
-                manager().staging().rememberViewer(uuid, joined.getUniqueId());
-            }
-        }
+        // Repairs flags leaked by an earlier session (or by a plugin removed while the player was
+        // staged). Visibility of already-staged players is handled once by
+        // PlayerLifecycleListener.onJoin -> StagingController.hideStagedFrom; duplicating that loop
+        // here re-hid players and recorded duplicate viewers.
+        manager().repair(event.getPlayer());
     }
 
     @EventHandler

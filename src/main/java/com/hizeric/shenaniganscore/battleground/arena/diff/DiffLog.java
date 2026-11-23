@@ -1,5 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.arena.diff;
 
+import com.hizeric.shenaniganscore.battleground.arena.MapIds;
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -68,8 +70,10 @@ public final class DiffLog {
 
     /** Encodes a round, allowing the writer to emit the uncommitted opening header. */
     public static byte[] encode(String mapId, long roundId, Set<Long> positions, boolean complete) {
-        if (mapId == null || mapId.isBlank()) {
-            throw new IllegalArgumentException("mapId is required");
+        // Canonical lowercase ids satisfy MapIds.isValid; the pure codec still honours legacy
+        // non-ASCII ids, but never one that could escape the per-map directory when used as a path.
+        if (!MapIds.isValid(mapId) && !MapIds.isPathSafe(mapId)) {
+            throw new IllegalArgumentException("Invalid arena map id: " + mapId);
         }
         if (positions == null) {
             throw new IllegalArgumentException("positions is required");
@@ -122,6 +126,11 @@ public final class DiffLog {
             in.get(id);
             String mapId = new String(id, StandardCharsets.UTF_8);
             long roundId = in.getLong();
+            // The decoded id may later be used as a directory name. Refuse traversal-shaped ids
+            // from untrusted bytes while keeping decode() non-throwing; legacy UTF-8 ids survive.
+            if (!MapIds.isValid(mapId) && !MapIds.isPathSafe(mapId)) {
+                return untrusted(mapId, roundId, Set.of(), "bad map id");
+            }
             int entryCount = in.getInt();
             if (entryCount < 0) {
                 return untrusted(mapId, roundId, Set.of(), "bad entry count");

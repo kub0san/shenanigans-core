@@ -78,6 +78,15 @@ public final class ArenaProtection implements Listener {
     /** Reload protection from an in-memory snapshot. Clears player overrides; no world rescan. */
     public void reload(ArenaRegion region, ArenaSnapshot snapshot) {
         playerPlaced.clear();
+        reloadPreservingPlaced(snapshot);
+    }
+
+    /**
+     * Repoints protection at a freshly captured snapshot without dropping player-placed overrides.
+     * A live capture keeps the round running, so in-memory overrides must stay in force; use
+     * {@link #reload(ArenaRegion, ArenaSnapshot)} after a restore when they must be cleared.
+     */
+    public void reloadPreservingPlaced(ArenaSnapshot snapshot) {
         this.snapshot = snapshot;
         this.solidAt = defaultProvider();
     }

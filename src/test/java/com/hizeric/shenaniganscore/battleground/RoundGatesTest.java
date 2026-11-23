@@ -107,4 +107,25 @@ class RoundGatesTest {
         // Someone never in the mode is not pulled anywhere by a round transition.
         assertEquals(RoundGates.RoundEnd.NONE, RoundGates.roundEnd(false, false, false));
     }
+
+    @Test
+    void secondTierOneGateForTheSameResetDoesNotStartAnotherRound() {
+        // RoundController.onTierOneGateOpen() delegates its guard to this one-shot gate: the
+        // restore engine can fire tier 1 synchronously (empty diff) and again on completion.
+        // The only production caller is the guard at RoundController.java:299; it needs a live
+        // BattlegroundManager/Bukkit to reach beginRound() and the diff ledger, so that wiring is
+        // covered by source, not by a mock harness here. This pins the guard's observable contract.
+        RoundController.TierOneGate gate = new RoundController.TierOneGate();
+        gate.reset(); // beginReset()
+        assertFalse(gate.consumed(), "a fresh reset arms the gate");
+
+        assertTrue(gate.tryOpen(), "the first tier-1 gate must open the round");
+        assertTrue(gate.consumed(), "the round is started and the ledger opened exactly once");
+        assertFalse(gate.tryOpen(), "a duplicate gate for the same reset must not advance the round");
+        assertTrue(gate.consumed(), "a spent gate stays spent: no second round and no reopened ledger");
+
+        gate.reset(); // the next reset arms a fresh gate
+        assertFalse(gate.consumed());
+        assertTrue(gate.tryOpen(), "a new round gets a fresh one-shot gate");
+    }
 }

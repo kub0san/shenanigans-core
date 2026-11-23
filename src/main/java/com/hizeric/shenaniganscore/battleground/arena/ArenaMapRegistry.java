@@ -12,7 +12,6 @@ import org.spongepowered.configurate.serialize.SerializationException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -37,9 +36,18 @@ public final class ArenaMapRegistry {
         ConfigurationNode mapsNode = root.node("maps");
         if (!mapsNode.virtual()) {
             String active = root.node("active").getString(ArenaSnapshotStore.DEFAULT_MAP_ID);
-            activeId = normalize(active);
+            try {
+                activeId = normalize(active);
+            } catch (IllegalArgumentException e) {
+                activeId = ArenaSnapshotStore.DEFAULT_MAP_ID;
+            }
             for (Map.Entry<Object, ? extends ConfigurationNode> entry : mapsNode.childrenMap().entrySet()) {
-                String id = normalize(String.valueOf(entry.getKey()));
+                String id;
+                try {
+                    id = normalize(String.valueOf(entry.getKey()));
+                } catch (IllegalArgumentException e) {
+                    continue; // skip an unsafe hand-edited key instead of failing the whole load
+                }
                 ArenaRegion region = readRegion(entry.getValue());
                 if (region != null) maps.put(id, region);
             }
@@ -64,9 +72,15 @@ public final class ArenaMapRegistry {
             root.removeChild(legacy);
         }
         CommentedConfigurationNode mapsNode = root.node("maps");
-        // Remove stale map ids.
+        // Remove stale map ids. A key that load() skipped as unsafe is stale too.
         for (Object key : new ArrayList<>(mapsNode.childrenMap().keySet())) {
-            String id = normalize(String.valueOf(key));
+            String id;
+            try {
+                id = normalize(String.valueOf(key));
+            } catch (IllegalArgumentException e) {
+                mapsNode.removeChild(key);
+                continue;
+            }
             if (!maps.containsKey(id)) mapsNode.removeChild(key);
         }
         for (Map.Entry<String, ArenaRegion> entry : maps.entrySet()) {
@@ -114,8 +128,12 @@ public final class ArenaMapRegistry {
     }
 
     private static String normalize(String id) {
-        if (id == null || id.isBlank()) return ArenaSnapshotStore.DEFAULT_MAP_ID;
-        return id.trim().toLowerCase(Locale.ROOT);
+        String normalized = MapIds.normalize(id);
+        if (normalized == null || normalized.isEmpty()) return ArenaSnapshotStore.DEFAULT_MAP_ID;
+        if (!MapIds.isValid(normalized)) {
+            throw new IllegalArgumentException("Invalid arena map id: " + id);
+        }
+        return normalized;
     }
 
     private static ArenaRegion readRegion(ConfigurationNode node) {

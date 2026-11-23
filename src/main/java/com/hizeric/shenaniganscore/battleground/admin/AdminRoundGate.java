@@ -47,9 +47,8 @@ public final class AdminRoundGate {
             return Result.deny("A round is already live.");
         }
         int duration = ArenaRuntimeConfig.current().roundDurationSeconds();
-        // AdminRoundGateTest expects the canonical 1200s start; live config is applied by RoundClock.
-        if (duration <= 0) duration = 1200;
-        return Result.allow(Effect.START, 1200, "Round started.");
+        if (duration <= 0) duration = ArenaRuntimeConfig.defaults().roundDurationSeconds();
+        return Result.allow(Effect.START, duration, "Round started.");
     }
 
     private static Result decideStop(RoundState state) {

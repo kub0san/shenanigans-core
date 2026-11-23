@@ -100,6 +100,8 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     private RestoreEffects effects;
     private boolean effectsFailureLogged;
     private int stepCounter;
+    /** Bumped by beginRestore; a load callback from an older generation is discarded. */
+    private long generation;
 
     private ArenaRegion region;
     private DiffLog.Decoded diff;
@@ -215,6 +217,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     public boolean beginRestore(ArenaRegion region, String mapId,
                                 DiffLog.Decoded diff, ArenaSnapshot snapshot) {
         cancel();
+        generation++;
         if (region == null || diff == null || snapshot == null) {
             logger.warning("Tiered arena restore skipped: region, diff or snapshot is missing.");
             queue.fail();
@@ -228,6 +231,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         queue.reset();
         queue.trackLedger(diff.positions());
         callbackBudget = null;
+        this.pendingLoads = 0;
         this.writtenChunks = 0L;
         this.stepCounter = 0;
         this.totalPositions = Math.max(1L, diff.positions().size());
@@ -245,7 +249,12 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         remaining.removeAll(essentials);
         Map<ChunkPos, List<Long>> remainingByChunk = groupByChunk(remaining);
         for (ChunkPos pos : snapshot.chunkPositions()) {
-            queue.enqueueTierTwo(pos, remainingByChunk.remove(pos));
+            List<Long> remainder = remainingByChunk.remove(pos);
+            if (remainder == null || remainder.isEmpty()) {
+                queue.enqueueVerification(pos);
+            } else {
+                queue.enqueueTierTwo(pos, remainder);
+            }
         }
         for (Map.Entry<ChunkPos, List<Long>> entry : remainingByChunk.entrySet()) {
             queue.enqueueTierTwo(entry.getKey(), entry.getValue());
@@ -272,7 +281,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
 
         Policy policy = deps.policy().get();
         WorkBudget budget = new WorkBudget(policy.msPerTick(), policy.blocksPerTick(),
-                policy.chunksPerTick(), nanoClock);
+                policy.chunksPerTick(), policy.sectionsPerTick(), nanoClock);
         budget.beginTick();
         // One budget for the whole tick: dispatch, verification and writes all draw from it.
         callbackBudget = budget;
@@ -299,10 +308,16 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
             deps.tickets().acquire(ticketKey);
             pendingLoads++;
             final Dispatch current = dispatch;
+            final long dispatchedGeneration = generation;
             try {
                 deps.loader().load(world, dispatch.pos().x(), dispatch.pos().z())
                         .whenComplete((chunk, error) -> deps.runner().run(() -> {
                             try {
+                                if (dispatchedGeneration != generation) {
+                                    // A newer restore owns the queue: this callback belongs to an
+                                    // abandoned snapshot/diff and must never reach processChunk.
+                                    return;
+                                }
                                 if (queue.failed() || queue.cancelled()) {
                                     // fail()/cancel() already ended the restore: drop in-flight work.
                                 } else if (error != null) {
@@ -318,7 +333,19 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                                         + exception.getMessage());
                             } finally {
                                 deps.tickets().release(ticketKey);
-                                pendingLoads = Math.max(0, pendingLoads - 1);
+                                // Only the owning generation decrements its own in-flight count.
+                                if (dispatchedGeneration == generation) {
+                                    pendingLoads = Math.max(0, pendingLoads - 1);
+                                    // A tier-2 boundary cancel may leave no stepper to drain the
+                                    // queue. The last owning callback must finish that restore;
+                                    // the guards keep stale/full-cancel callbacks from refiring
+                                    // onFinished or interfering with a newer generation.
+                                    if (restoring && !queue.cancelled()
+                                            && queue.tierTwoCancelled()
+                                            && queue.jobsEmpty() && pendingLoads == 0) {
+                                        finish();
+                                    }
+                                }
                             }
                         }));
             } catch (RuntimeException exception) {
@@ -344,11 +371,14 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
 
     @Override
     public void cancel() {
+        boolean wasActive = restoring || phase == Phase.TIER_ONE || phase == Phase.TIER_TWO;
         queue.cancel();
         scans.clear();
         restoring = false;
         phase = Phase.IDLE;
         deps.tickets().releaseAll();
+        // End the cosmetic layer too, or a boss bar survives a disable/round-boundary cancel.
+        if (wasActive) fx(() -> effects.onFinished(world(), false));
     }
 
     /** Round-boundary cancellation: tier 2 stops, tier 1 stays complete. */
@@ -375,6 +405,9 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     public Runnable onTierOneComplete() { return onTierOneComplete; }
 
     public Phase phase() { return phase; }
+
+    /** Changes on every beginRestore; callbacks carrying an older value are ignored. */
+    public long generation() { return generation; }
 
     public String mapId() { return mapId; }
 
@@ -414,7 +447,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     private WorkBudget sharedBudget(Policy policy) {
         if (callbackBudget == null) {
             callbackBudget = new WorkBudget(policy.msPerTick(), policy.blocksPerTick(),
-                    policy.chunksPerTick(), nanoClock);
+                    policy.chunksPerTick(), policy.sectionsPerTick(), nanoClock);
             callbackBudget.beginTick();
         }
         return callbackBudget;
@@ -430,7 +463,9 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         WorkBudget work = sharedBudget(policy);
 
         boolean escalateToSnapshot = false;
-        if (policy.verify() && !verified.contains(dispatch.pos())) {
+        // An unflushed ledger is untrustworthy even when the verify toggle is off.
+        boolean mustVerify = policy.verify() || (diff != null && !diff.complete());
+        if (mustVerify && !verified.contains(dispatch.pos())) {
             ChunkScan scan = scans.computeIfAbsent(dispatch.pos(),
                     pos -> new ChunkScan(snapshot, pos));
             boolean finished = scan.step((x, y, z) -> deps.stateProbe().at(world, x, y, z),
@@ -440,7 +475,12 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                 // Not enough budget to reach a verdict yet: hold this slice, keep the scan cursor,
                 // and retry next tick. Nothing is written to a chunk we have not fully inspected.
                 // (Tier 1 never waits on verification, so the deployment gate is unaffected.)
-                queue.requeueUnwritten(dispatch.pos(), false, dispatch.writes());
+                if (dispatch.writes().isEmpty()) {
+                    // Verification-only jobs have no write slice to re-queue.
+                    queue.enqueueVerification(dispatch.pos());
+                } else {
+                    queue.requeueUnwritten(dispatch.pos(), false, dispatch.writes());
+                }
                 return;
             }
             if (finished) {
@@ -486,6 +526,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
             writtenHere.add(packed);
             if (policy.relight() && ArenaChunkWork.needsRelight(state)) {
                 deps.writer().write(world, packed, state, true);
+                work.recordBlock(); // the forced re-apply is real, budgeted work too
             }
         }
         if (!unwritten.isEmpty()) queue.requeueUnwritten(dispatch.pos(), dispatch.tierOne(), unwritten);

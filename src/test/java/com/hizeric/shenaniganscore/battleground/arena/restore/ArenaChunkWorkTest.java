@@ -77,6 +77,31 @@ class ArenaChunkWorkTest {
         assertTrue(budget.canStartChunk());
     }
 
+    /** RED: a one-chunk cap must still allow that chunk's two sections to dispatch. */
+    @Test
+    void sectionCapIsSeparateFromTheChunkCap() {
+        long[] now = {0L};
+        WorkBudget one = new WorkBudget(30, 256, 1, () -> now[0]);
+        one.beginTick();
+        assertTrue(one.canStartChunk());
+        assertTrue(one.canStartSections(ArenaChunkWork.SECTIONS_PER_CHUNK_CAP),
+                "one chunk owns two sections, so its cap must allow two");
+        one.recordChunk();
+        assertFalse(one.canStartSections(ArenaChunkWork.SECTIONS_PER_CHUNK_CAP),
+                "the single chunk has consumed the whole section allowance");
+
+        WorkBudget four = new WorkBudget(30, 256, 4, () -> now[0]);
+        four.beginTick();
+        int dispatched = 0;
+        while (four.canStartChunk()
+                && four.canStartSections(ArenaChunkWork.SECTIONS_PER_CHUNK_CAP)) {
+            four.recordChunk();
+            dispatched++;
+        }
+        assertEquals(4, dispatched, "all four default chunks may dispatch in one tick");
+        assertEquals(4, four.chunksThisTick());
+    }
+
     @Test
     void policyDerivesSectionCapFromLiveConfigChunkCap() {
         Policy policy = Policy.from(ArenaRuntimeConfig.defaults());

@@ -51,7 +51,7 @@ final class CaptureService {
             m.arenaStore.setCaptureInfo(id, region.capturedBlocks(), "snapshot");
             m.arenaStore.save();
             if (id.equals(m.arenaStore.activeMapId())) {
-                ArenaProtection.get().reload(region, snapshot);
+                ArenaProtection.get().reloadPreservingPlaced(snapshot);
             }
             m.plugin.getLogger().info("Captured arena snapshot for map '" + id + "'.");
             return true;

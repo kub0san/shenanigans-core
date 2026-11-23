@@ -9,10 +9,13 @@ import com.hizeric.shenaniganscore.battleground.arena.diff.AsyncDiffWriter;
 import com.hizeric.shenaniganscore.battleground.arena.diff.DiffLog;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot;
 import com.hizeric.shenaniganscore.battleground.command.Permissions;
+import com.hizeric.shenaniganscore.battleground.player.ArenaInventories;
 import com.hizeric.shenaniganscore.battleground.player.BattlegroundLock;
 import com.hizeric.shenaniganscore.core.domain.DomainRegistry;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -38,6 +41,28 @@ final class RoundController {
     private ScheduledTask restoreTask;
     private ScheduledTask hudTask;
     private ScheduledTask clockTask;
+
+    /** One-shot tier-1 gate, rearmed exactly once per {@link #beginReset()}. */
+    private final TierOneGate tierOneGateConsumed = new TierOneGate();
+
+    /**
+     * The restore engine can fire the tier-1 gate synchronously from {@code beginRestore} when the
+     * diff is empty, and again when tier 2 finishes. Only the first call for a generation may
+     * advance the round (and open the diff ledger).
+     */
+    static final class TierOneGate {
+        private boolean consumed;
+
+        void reset() { consumed = false; }
+
+        boolean tryOpen() {
+            if (consumed) return false;
+            consumed = true;
+            return true;
+        }
+
+        boolean consumed() { return consumed; }
+    }
 
     RoundController(BattlegroundManager manager) {
         this.m = manager;
@@ -140,6 +165,7 @@ final class RoundController {
         }
         if (m.state == RoundState.RESTORING) return;
         m.state = RoundState.STAGING;
+        tierOneGateConsumed.reset(); // one gate per reset generation
 
         // Round end: pull every deployed player back to the hub — including one mid-fight or
         // mid-dive — and clear their dive/lock state so nothing holds them in the arena.
@@ -151,23 +177,26 @@ final class RoundController {
             if (RoundGates.roundEnd(true, diving, m.staging.isStaged(player))
                     != RoundGates.RoundEnd.HUB) continue;
             com.hizeric.shenaniganscore.battleground.menu.shell.MenuLatch.get().clear(player);
+            // Hand the hub inventory back BEFORE staging captures it: otherwise the staging
+            // registry pins the arena kit and reissues it on the next deploy. Refreshing the
+            // ArenaInventories snapshot keeps hub acquisitions made this round for the next one.
+            m.deploys.restoreInventory(player);
+            m.inventories.replace(uuid, new ArenaInventories.Snapshot(
+                    player.getInventory().getContents(), player.getItemOnCursor()));
             m.staging.enter(player);
             // Evacuate staged players out of the arena footprint so the restore's near-player
             // deferral cannot stall the rebuild (and so blocks are not written under them).
             ArenaRegion evacRegion = m.arenaStore.region();
-            org.bukkit.World evacWorld = (evacRegion == null) ? player.getWorld() : evacRegion.world();
-            if (evacWorld == null) evacWorld = player.getWorld();
-            org.bukkit.Location evacDest = evacWorld.getSpawnLocation();
-            if (evacRegion != null && evacRegion.containsHorizontal(evacDest)) {
-                evacDest = new org.bukkit.Location(evacWorld,
-                        evacRegion.min().getBlockX() - 32.0,
-                        evacRegion.max().getBlockY() + 5.0,
-                        evacRegion.min().getBlockZ() - 32.0);
+            Location evacDest = evacuationDestination(player, evacRegion);
+            if (evacDest == null || !player.teleport(evacDest)) {
+                // A failed teleport means we must not pretend the player is clear of the arena.
+                m.plugin.getLogger().warning("Could not evacuate " + player.getName()
+                        + " from the arena before restore; leaving them where they are.");
+            } else {
+                player.setAllowFlight(true);
+                player.setFlying(true);
+                m.staging.registry().setAnchor(uuid, evacDest);
             }
-            player.teleport(evacDest);
-            player.setAllowFlight(true);
-            player.setFlying(true);
-            m.staging.registry().setAnchor(player.getUniqueId(), evacDest);
             new com.hizeric.shenaniganscore.battleground.menu.shell.HubScreen(m.plugin, player).show();
         }
         m.deployed.clear();
@@ -185,6 +214,52 @@ final class RoundController {
         // No tiered restore available: fall back to a safe ready state.
         onTierOneGateOpen();
         onRestoreComplete();
+    }
+
+    /**
+     * Picks a hub-side destination outside the arena footprint that is inside the world border and
+     * within the build height. {@code null} means no safe destination exists and evacuation must be
+     * skipped rather than teleporting into the void or writing blocks under a player.
+     */
+    private static Location evacuationDestination(Player player, ArenaRegion region) {
+        World world = region == null ? null : region.world();
+        if (world == null) world = player.getWorld();
+        if (world == null) return null;
+
+        Location spawn = world.getSpawnLocation();
+        if (safeEvacuation(spawn, region, world)) return spawn;
+        if (region == null) return null; // no corners to try: skip an unsafe spawn
+
+        int minX = region.min().getBlockX();
+        int maxX = region.max().getBlockX();
+        int minZ = region.min().getBlockZ();
+        int maxZ = region.max().getBlockZ();
+        int minY = world.getMinHeight();
+        int maxY = world.getMaxHeight() - 1;
+        int y = Math.max(minY, Math.min(region.max().getBlockY() + 5, maxY));
+        int[][] offsets = {{-32, -32}, {-32, 32}, {32, -32}, {32, 32}};
+        for (int[] offset : offsets) {
+            int x = offset[0] < 0 ? minX + offset[0] : maxX + offset[0];
+            int z = offset[1] < 0 ? minZ + offset[1] : maxZ + offset[1];
+            Location candidate = new Location(world, x + 0.5, y + 0.5, z + 0.5);
+            if (safeEvacuation(candidate, region, world)) return candidate;
+        }
+        return null;
+    }
+
+    private static boolean safeEvacuation(Location location, ArenaRegion region, World world) {
+        if (location == null || location.getWorld() == null
+                || !world.equals(location.getWorld())) return false;
+        if (location.getBlockY() < world.getMinHeight()
+                || location.getBlockY() >= world.getMaxHeight()) return false;
+        if (!world.getWorldBorder().isInside(location)) return false;
+        if (region != null) {
+            int x = location.getBlockX();
+            int z = location.getBlockZ();
+            if (x >= region.min().getBlockX() && x <= region.max().getBlockX()
+                    && z >= region.min().getBlockZ() && z <= region.max().getBlockZ()) return false;
+        }
+        return true;
     }
 
     private boolean startTieredRestore(String mapId, DiffLog.Decoded diff, boolean recovery) {
@@ -206,9 +281,14 @@ final class RoundController {
                     safeDiff.positions(), safeDiff.problem());
         }
         m.restoreEngine.mapId(mapId);
+        // Set STAGING before beginRestore(): an empty diff fires the tier-1 gate synchronously,
+        // and the old order overwrote the RUNNING state the gate had just installed.
+        m.state = RoundState.STAGING;
         boolean started = m.restoreEngine.beginRestore(region, mapId, safeDiff, snapshot);
         if (started) {
-            m.state = RoundState.STAGING;
+            // Tier 1 still pending: RESTORING is the live state that disables Deploy in the hub.
+            // If the gate already fired synchronously it consumed its token and moved us to RUNNING.
+            if (!tierOneGateConsumed.consumed()) m.state = RoundState.RESTORING;
             startRestoreTask();
         }
         return started;
@@ -216,6 +296,7 @@ final class RoundController {
 
     /** Called by the restore engine when tier 1 completes (and by recovery fallbacks). */
     void onTierOneGateOpen() {
+        if (!tierOneGateConsumed.tryOpen()) return;
         if (!beginRound("<green>Round <white>" + (m.roundNumber + 1)
                 + "<green> is ready — deploy with /battleground join")) return;
         m.announce(m.economy.roundSummary());
@@ -358,6 +439,10 @@ final class RoundController {
         // A stopped round is no longer live: commit and close its diff so late events are not
         // silently queued into a ledger the next beginRound() will clear anyway.
         flushDiffLedger(m.arenaStore.activeMapId());
+        // A tier-2 restore can still be writing when the round is forced to IDLE. Stop both the
+        // writes and their 20 Hz stepper so an IDLE deploy cannot start a round underneath them.
+        if (m.restoreEngine != null) m.restoreEngine.cancelTierTwo();
+        stopRestoreTask();
         m.state = RoundState.IDLE;
         for (UUID uuid : new ArrayList<>(m.deployed)) {
             Player player = Bukkit.getPlayer(uuid);
@@ -365,7 +450,11 @@ final class RoundController {
         }
         for (UUID uuid : new ArrayList<>(stagedUuids())) {
             Player player = Bukkit.getPlayer(uuid);
-            if (player != null) m.staging.exit(player);
+            if (player != null) {
+                // Hand back the hub kit before staging replays its own snapshot.
+                m.deploys.restoreInventory(player);
+                m.staging.exit(player);
+            }
             else {
                 BattlegroundLock.exit(uuid);
                 m.staging.removeSnapshot(uuid);
@@ -445,15 +534,23 @@ final class RoundController {
                 ArenaRuntimeConfig.load(
                         new File(new File(m.plugin.getDataFolder(), "battleground"), "config.yml"),
                         m.plugin.getLogger());
-                m.arenaStore.load();
             } catch (RuntimeException e) {
                 success = false;
                 m.plugin.getLogger().log(Level.SEVERE, "Async config reload failed", e);
             }
             final boolean result = success;
             Bukkit.getGlobalRegionScheduler().execute(m.plugin, () -> {
-                if (result) DomainRegistry.get().clearClaimsIfIdle();
-                if (onComplete != null) onComplete.accept(result);
+                // ArenaStore.load() resolves Bukkit worlds and mutates unsynchronised registries;
+                // it is main-thread work and must never stay on the async config thread.
+                boolean ok = result;
+                try {
+                    m.arenaStore.load();
+                } catch (RuntimeException e) {
+                    ok = false;
+                    m.plugin.getLogger().log(Level.SEVERE, "Arena data reload failed", e);
+                }
+                if (ok) DomainRegistry.get().clearClaimsIfIdle();
+                if (onComplete != null) onComplete.accept(ok);
             });
         });
     }

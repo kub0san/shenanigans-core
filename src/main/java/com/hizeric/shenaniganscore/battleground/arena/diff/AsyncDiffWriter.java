@@ -1,5 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.arena.diff;
 
+import com.hizeric.shenaniganscore.battleground.arena.MapIds;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -46,6 +48,8 @@ public final class AsyncDiffWriter {
 
     private static final long FOLD_PERIOD_MS = 1_000L;
     private static final String TMP_SUFFIX = ".tmp";
+    /** Refuse a diff log larger than this before any byte is read into memory. */
+    private static final long MAX_DIFF_BYTES = 64L * 1024L * 1024L;
 
     /** Everything that belongs to exactly one round. */
     private static final class Round {
@@ -187,6 +191,11 @@ public final class AsyncDiffWriter {
 
     /** Convenience for the restart path: decode a log file without duplicating file reading. */
     public static DiffLog.Decoded read(Path file) throws IOException {
+        long size = Files.size(file);
+        if (size > MAX_DIFF_BYTES) {
+            throw new IOException("arena diff log is too large (" + size + " bytes, max "
+                    + MAX_DIFF_BYTES + "): " + file);
+        }
         return DiffLog.decode(Files.readAllBytes(file));
     }
 
@@ -259,12 +268,10 @@ public final class AsyncDiffWriter {
     }
 
     private static String validateMapId(String mapId) {
-        if (mapId == null || mapId.isBlank()
-                || mapId.contains("/") || mapId.contains("\\")
-                || mapId.equals(".") || mapId.equals("..")
-                || mapId.chars().anyMatch(Character::isISOControl)) {
+        String normalized = MapIds.normalize(mapId);
+        if (!MapIds.isValid(normalized)) {
             throw new IllegalArgumentException("Invalid arena map id: " + mapId);
         }
-        return mapId;
+        return normalized;
     }
 }

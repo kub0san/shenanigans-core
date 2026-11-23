@@ -1,11 +1,16 @@
 package com.hizeric.shenaniganscore.battleground.arena.snapshot;
 
+import com.hizeric.shenaniganscore.battleground.arena.ArenaStore;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot.ChunkPos;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Handler;
@@ -42,6 +47,37 @@ class ArenaSnapshotStoreTest {
         String path = store.snapshotPath("ffa").toString().replace('\\', '/');
         assertTrue(path.endsWith("/arena/ffa/snapshot.bin"), path);
         assertThrows(IllegalArgumentException.class, () -> store.snapshotPath("../escape"));
+    }
+
+    @Test
+    void snapshotPathNormalisesUppercaseAndRejectsInvalidIds() {
+        ArenaSnapshotStore store = store(Logger.getLogger("snapshot-case-test"));
+        String path = store.snapshotPath("FFA").toString().replace('\\', '/');
+        assertTrue(path.endsWith("/arena/ffa/snapshot.bin"), path);
+        assertThrows(IllegalArgumentException.class, () -> store.snapshotPath("Bad Id!"));
+    }
+
+    @Test
+    void schematicFileRejectsTraversalAndNormalisesUppercase() {
+        ArenaStore store = new ArenaStore(null, temp.toFile());
+        assertThrows(IllegalArgumentException.class, () -> store.schematicFile("../escape"));
+        String path = store.schematicFile("FFA").toString().replace('\\', '/');
+        assertTrue(path.endsWith("/ffa/main.schem"), path);
+    }
+
+    @Test
+    void loadRejectsOversizedFileBeforeReadingIt() throws Exception {
+        ArenaSnapshotStore store = store(Logger.getLogger("snapshot-size-test"));
+        Path file = store.snapshotPath("ffa");
+        Files.createDirectories(file.getParent());
+        try (FileChannel channel = FileChannel.open(file,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+            channel.position(ArenaSnapshotStore.MAX_SNAPSHOT_BYTES);
+            channel.write(ByteBuffer.wrap(new byte[]{1}));
+        }
+
+        IOException failure = assertThrows(IOException.class, () -> store.load("ffa"));
+        assertTrue(failure.getMessage().contains("too large"), failure.getMessage());
     }
 
     @Test

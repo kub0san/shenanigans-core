@@ -38,6 +38,8 @@ final class ArenaRestoreQueue {
 
     private final Deque<Job> tierOneJobs = new ArrayDeque<>();
     private final Deque<Job> tierTwoJobs = new ArrayDeque<>();
+    /** Chunks with no ledger remainder still need one completeness scan. */
+    private final Deque<ChunkPos> verificationJobs = new ArrayDeque<>();
     /** Distinct positions actually written, the only honest source for progress. */
     private final Set<Long> written = new LinkedHashSet<>();
     /** Tier-1 positions enqueued and not yet written. Empty means the gate may open. */
@@ -56,6 +58,7 @@ final class ArenaRestoreQueue {
     void reset() {
         tierOneJobs.clear();
         tierTwoJobs.clear();
+        verificationJobs.clear();
         written.clear();
         tierOneRemaining.clear();
         trackedLedger = null;
@@ -97,8 +100,15 @@ final class ArenaRestoreQueue {
         }
     }
 
-    int jobCount() { return tierOneJobs.size() + tierTwoJobs.size(); }
-    boolean jobsEmpty() { return tierOneJobs.isEmpty() && tierTwoJobs.isEmpty(); }
+    /** One bounded verification job for a snapshot chunk the ledger cannot account for. */
+    void enqueueVerification(ChunkPos pos) {
+        if (pos != null) verificationJobs.addLast(pos);
+    }
+
+    int jobCount() { return tierOneJobs.size() + verificationJobs.size() + tierTwoJobs.size(); }
+    boolean jobsEmpty() {
+        return tierOneJobs.isEmpty() && verificationJobs.isEmpty() && tierTwoJobs.isEmpty();
+    }
     int tierOneCount() { return tierOneJobs.size(); }
     int jobsDone() { return jobsDone; }
     int writtenCount() { return written.size(); }
@@ -134,11 +144,13 @@ final class ArenaRestoreQueue {
         cancelled = true;
         tierTwoCancelled = true;
         tierOneJobs.clear();
+        verificationJobs.clear();
         tierTwoJobs.clear();
     }
 
     void cancelTierTwo() {
         tierTwoCancelled = true;
+        verificationJobs.clear();
         tierTwoJobs.clear();
     }
 
@@ -149,16 +161,15 @@ final class ArenaRestoreQueue {
      */
     Dispatch next(int blockCap, Predicate<Long> deferred) {
         if (failed || cancelled) return null;
-        Deque<Job> source;
-        if (!tierOneJobs.isEmpty()) {
-            source = tierOneJobs;
-        } else if (canDispatchTierTwo()) {
-            source = tierTwoJobs;
-        } else {
-            return null;
+        if (!tierOneJobs.isEmpty()) return nextFrom(tierOneJobs, blockCap, deferred);
+        if (!canDispatchTierTwo()) return null;
+        if (!verificationJobs.isEmpty()) {
+            return new Dispatch(verificationJobs.removeFirst(), List.of(), false, true);
         }
-        if (source.isEmpty()) return null;
+        return tierTwoJobs.isEmpty() ? null : nextFrom(tierTwoJobs, blockCap, deferred);
+    }
 
+    private Dispatch nextFrom(Deque<Job> source, int blockCap, Predicate<Long> deferred) {
         Job job = source.peekFirst();
         List<Long> pending = job.pending();
         int cap = Math.max(1, blockCap);
@@ -202,6 +213,7 @@ final class ArenaRestoreQueue {
     void escalateTierTwoToChunk(ChunkPos pos, Collection<Long> fullChunkPositions) {
         if (tierTwoCancelled || pos == null || fullChunkPositions == null) return;
         tierTwoJobs.removeIf(job -> job.pos().equals(pos));
+        verificationJobs.remove(pos); // one job per chunk: escalation supersedes its scan
         List<Long> pending = new ArrayList<>(fullChunkPositions.size());
         for (long packed : fullChunkPositions) {
             if (!written.contains(packed)) pending.add(packed);

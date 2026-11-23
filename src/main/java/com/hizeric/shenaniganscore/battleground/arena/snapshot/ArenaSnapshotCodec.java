@@ -130,8 +130,10 @@ public final class ArenaSnapshotCodec {
             String worldId = in.readUTF();
             int minX = in.readInt(), minY = in.readInt(), minZ = in.readInt();
             int maxX = in.readInt(), maxY = in.readInt(), maxZ = in.readInt();
-            if (minX > maxX || minY > maxY || minZ > maxZ) {
-                throw new IOException("arena snapshot bounds are inverted");
+            try {
+                ArenaSnapshot.validateBounds(minX, minY, minZ, maxX, maxY, maxZ);
+            } catch (IllegalArgumentException e) {
+                throw new IOException(e.getMessage(), e);
             }
             long capturedAt = in.readLong();
             long capturedBlocks = in.readLong();

@@ -15,6 +15,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class DiveService {
 
     private final Set<UUID> diving = ConcurrentHashMap.newKeySet();
+    // Set by SkyDrop's constructor; lets every existing clear() caller stop the dive task too.
+    private volatile SkyDrop skyDrop;
+
+    void attach(SkyDrop skyDrop) {
+        this.skyDrop = skyDrop;
+    }
 
     public boolean isDiving(UUID uuid) {
         return uuid != null && diving.contains(uuid);
@@ -29,10 +35,15 @@ public final class DiveService {
     }
 
     public void clear(UUID uuid) {
-        if (uuid != null) diving.remove(uuid);
+        if (uuid == null) return;
+        diving.remove(uuid);
+        SkyDrop sink = skyDrop;
+        if (sink != null) sink.cancel(uuid);
     }
 
     public void clear() {
         diving.clear();
+        SkyDrop sink = skyDrop;
+        if (sink != null) sink.cancelAll();
     }
 }
