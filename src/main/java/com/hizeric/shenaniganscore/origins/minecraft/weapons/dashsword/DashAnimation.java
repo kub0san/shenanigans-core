@@ -15,7 +15,7 @@ import java.util.Map;
 public final class DashAnimation {
 
     public static final int TRAIL_TICKS = 28;
-    public static final int GHOST_COUNT = 5;
+    public static final int GHOST_COUNT = 1;
     public static final int GHOST_LIFE = 18;
     public static final double GHOST_ARC_RADIUS = 1.4;
 
@@ -50,7 +50,7 @@ public final class DashAnimation {
     private static final Map<Kind, Beat> BEATS = Map.of(
             Kind.CLEAVE_BURST, new Beat(Kind.CLEAVE_BURST, 0, 2, 1),
             Kind.RIFT_RIBBON, new Beat(Kind.RIFT_RIBBON, 1, 14, 1),
-            Kind.GHOST_ARC, new Beat(Kind.GHOST_ARC, 2, 20, 3),
+            Kind.GHOST_ARC, new Beat(Kind.GHOST_ARC, 2, 20, 2),
             Kind.WIND_CHARGE, new Beat(Kind.WIND_CHARGE, 0, 6, 3));
 
     private static final List<Sound> SOUNDS = List.of(

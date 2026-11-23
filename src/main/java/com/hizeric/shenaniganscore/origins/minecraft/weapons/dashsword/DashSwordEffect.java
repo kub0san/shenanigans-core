@@ -17,7 +17,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -73,14 +72,16 @@ public final class DashSwordEffect {
         private final List<DashAnimation.Frame> launch = DashAnimation.launch();
         private final List<DashAnimation.Frame> trail = DashAnimation.trail();
         private final List<ItemDisplay> displays = new ArrayList<>();
-        private final List<Ghost> ghosts = new ArrayList<>();
+        private final MannequinEchoRenderer echoes;
         private final List<Ring> rings = new ArrayList<>();
+        private int echoIndex;
 
         private Vector shakeRestore;
         private int tick;
 
         private Timeline(Player player, Vector forward) {
             this.player = player;
+            this.echoes = new MannequinEchoRenderer(player);
             this.forward = forward.clone().normalize();
             this.right = DashAnimation.rightOf(this.forward);
             this.up = this.right.clone().crossProduct(this.forward).normalize();
@@ -110,8 +111,8 @@ public final class DashSwordEffect {
             for (DashAnimation.Sound sound : launchFrame.sounds()) play(sound);
             if (launchFrame.shake()) shake();
 
-            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnGhosts(spawn);
-            ageGhosts();
+            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn);
+            echoes.tick(tick);
             animateRings();
             tick++;
         }
@@ -145,35 +146,16 @@ public final class DashSwordEffect {
             }
         }
 
-        private void spawnGhosts(DashAnimation.DisplaySpawn spawn) {
+        private void spawnEchoes(DashAnimation.DisplaySpawn spawn) {
             Location at = player.getLocation().clone().add(0, 0.9, 0);
             Location behind = at.clone().subtract(forward.clone().multiply(0.4));
             for (int i = 0; i < spawn.count(); i++) {
-                double angle = (Math.PI * 2.0 * i) / spawn.count();
-                Location point = behind.clone()
-                        .add(right.clone().multiply(Math.cos(angle) * DashAnimation.GHOST_ARC_RADIUS))
-                        .add(up.clone().multiply(Math.sin(angle) * DashAnimation.GHOST_ARC_RADIUS));
-                ItemDisplay ghost = DisplayUtils.spawnItem(point,
-                        new ItemStack(Material.NETHERITE_SWORD), options());
-                ghost.setRotation(at.getYaw(), 20.0f);
-                TransformUtils.applyTransform(ghost, spawn.scale(), spawn.scale(), spawn.scale(),
-                        0f, 0f, 0f, 1);
-                displays.add(ghost);
-                ghosts.add(new Ghost(ghost, tick));
-            }
-        }
-
-        private void ageGhosts() {
-            for (Iterator<Ghost> it = ghosts.iterator(); it.hasNext(); ) {
-                Ghost ghost = it.next();
-                int age = tick - ghost.bornTick();
-                if (age >= DashAnimation.GHOST_LIFE || !ghost.display().isValid()) {
-                    remove(ghost.display());
-                    it.remove();
-                    continue;
-                }
-                float scale = DashAnimation.ghostScale(age);
-                TransformUtils.applyTransform(ghost.display(), scale, scale, scale, 0f, 0f, 0f, 1);
+                // One echo per beat, dropped just behind the caster with an alternating lateral
+                // offset — an afterimage trail, never a ring of floating weapons.
+                double offset = (echoIndex++ % 2 == 0 ? 1.0 : -1.0)
+                        * DashAnimation.GHOST_ARC_RADIUS;
+                Location point = behind.clone().add(right.clone().multiply(offset));
+                echoes.spawn(point, at.getYaw(), at.getPitch(), tick);
             }
         }
 
@@ -217,12 +199,10 @@ public final class DashSwordEffect {
         private void clear() {
             for (ItemDisplay display : displays) remove(display);
             displays.clear();
-            ghosts.clear();
+            echoes.close();
             rings.clear();
         }
     }
-
-    private record Ghost(ItemDisplay display, int bornTick) { }
 
     private record Ring(ItemDisplay display, int bornTick, int index, int total, float baseScale) { }
 
