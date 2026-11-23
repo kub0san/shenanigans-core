@@ -42,6 +42,8 @@ abilities:
   items:
     dash-sword:
       cooldown: 30
+    executioner-sword:
+      cooldown: 90
   techniques:
     blue:
       cooldown: 30
