@@ -821,4 +821,45 @@ class ArenaRestoreEngineTest {
         }
         assertEquals(100, engine.progressPercent());
     }
+
+    /** A resumable verification slice is completed work, so the bar moves between scan ticks. */
+    @Test void resumableVerificationScanAdvancesProgressEachSlice() {
+        Fixture fx = new Fixture();
+        long[] nanos = {0L};
+        Policy ms1 = new Policy(1, 256, 1, 2, false, true, false);
+        Deps deps = new Deps(OK_LOADER, SYNC,
+                (w, packed, state, physics) -> fx.writes.add(packed),
+                STONE, () -> ms1,
+                new TicketLedger<>(key -> { }, key -> { }), WORLD);
+        ArenaRestoreEngine engine = new ArenaRestoreEngine(deps, LOG, null,
+                () -> (nanos[0] += 50_000L));
+        assertTrue(engine.beginRestore(region(), "ffa", unflushedEmptyDiff(),
+                stoneChunks(0, 63, 15, 15)));
+        engine.restoreStep(null);
+        int first = engine.progressPercent();
+        assertTrue(first > 0, "the first completed scan slice is real work, progress was " + first);
+        assertTrue(first < 100, "the chunk is not verified yet");
+        for (int i = 0; i < 500 && engine.isRestoring(); i++) engine.restoreStep(null);
+        assertEquals(100, engine.progressPercent());
+    }
+
+    /** Newly discovered tier-2 escalation work must never read 100% before it finishes. */
+    @Test void emptyLedgerEscalationNeverClaimsHundredBeforeDone() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine.StateProbe unlogged = (w, x, y, z) ->
+                (x == 1 && y == 60 && z == 1) ? "minecraft:dirt" : "minecraft:stone";
+        Policy escalating = new Policy(100_000, 4, 1, 2, false, true, true);
+        ArenaRestoreEngine engine = engine(fx, escalating, SYNC, OK_LOADER, unlogged);
+        assertTrue(engine.beginRestore(region(), "ffa", unflushedEmptyDiff(),
+                stoneChunks(60, 61, 15, 15)));
+        for (int i = 0; i < 100 && engine.untrustedChunks() == 0 && engine.isRestoring(); i++) {
+            engine.restoreStep(null);
+        }
+        assertEquals(1, engine.untrustedChunks(), "probe discrepancy must mark the chunk untrusted");
+        assertTrue(engine.isRestoring(), "escalated tier-2 work is still pending");
+        assertTrue(engine.progressPercent() < 100, "newly discovered escalation work must not read 100%");
+        drive(engine);
+        assertFalse(engine.isRestoring());
+        assertEquals(100, engine.progressPercent());
+    }
 }

@@ -469,6 +469,8 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                 } else {
                     queue.requeueUnwritten(dispatch.pos(), false, dispatch.writes());
                 }
+                // A resumable scan slice is completed work even though no verdict exists yet.
+                queue.recordChunkDone();
                 return;
             }
             if (finished) {
