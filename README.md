@@ -13,7 +13,7 @@ An *origin* is just what we call each series we take inspiration from.
 ## Features
 
 - **Multiple Origins:** Starting with Jujutsu Kaisen, with Terraria and other series planned for the future.
-- **Domain Expansions:** Malevolent Shrine (open), Unlimited Void, Time Cell Moon Palace, and Womb Profusion (closed).
+- **Domain Expansions:** Malevolent Shrine , Unlimited Void, Time Cell Moon Palace, and Womb Profusion
 - **Cursed Techniques:** Fuga, Red, Blue, Purple, Piercing Blood, and World Slash. Cast them using `/ability 1|2|3`.
 - **Battleground:** A dedicated arena mode with capture mechanics, loadouts, a killstreak shop, and protection/restore systems.
 - **Custom Resource Pack:** A bundled, self-hosted resource pack with custom HUD elements, ability icons, and item textures.
