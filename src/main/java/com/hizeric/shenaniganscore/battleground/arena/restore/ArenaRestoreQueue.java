@@ -225,6 +225,7 @@ final class ArenaRestoreQueue {
         }
     }
 
+    /** Records one completed work slice: a finished chunk or a resumed scan slice. */
     void recordChunkDone() { jobsDone++; }
 
     /**
@@ -245,5 +246,17 @@ final class ArenaRestoreQueue {
             }
         }
         return (int) Math.min(100L, done * 100L / Math.max(1L, total));
+    }
+
+    /**
+     * Completion share over work slices, for restores whose diff ledger has no positions to count.
+     * A dispatched-but-unfinished job is still remaining work; a newly discovered job lowers the
+     * share rather than freezing at a stale value. Failed restores are capped below 100.
+     */
+    int progressPercentByWork(int inFlight) {
+        int remaining = jobCount() + Math.max(0, inFlight);
+        int total = jobsDone + remaining;
+        int percent = total <= 0 ? 0 : (int) Math.min(100L, jobsDone * 100L / total);
+        return failed ? Math.min(99, percent) : percent;
     }
 }

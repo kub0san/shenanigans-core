@@ -189,4 +189,15 @@ class ArenaVerificationTest {
                 "!diff.complete() must override restoreVerify=false");
         assertTrue(writes.isEmpty());
     }
+
+    /** An empty committed ledger must not freeze progress at 0% while verification jobs run. */
+    @Test void emptyCommittedLedgerProgressIsNotStuckAtZero() {
+        List<Long> writes = new ArrayList<>();
+        ArenaRestoreEngine engine = engine(true, writes);
+        assertTrue(engine.beginRestore(region(), "ffa", emptyDiff(true), chunkGrid()));
+        engine.restoreStep(null);
+        assertTrue(engine.progressPercent() > 0, "an empty ledger must not freeze progress at 0%");
+        for (int i = 0; i < 100 && engine.isRestoring(); i++) engine.restoreStep(null);
+        assertEquals(100, engine.progressPercent());
+    }
 }
