@@ -82,7 +82,7 @@ class BundledConfigSchemaTest {
         assertEquals(30, root.node("arena", "restore", "ms-per-tick").getInt());
         assertEquals(256, root.node("arena", "restore", "blocks-per-tick").getInt());
         assertEquals(4, root.node("arena", "restore", "chunks-per-tick").getInt());
-        assertTrue(root.node("arena", "restore", "defer-near-player").getBoolean());
+        assertTrue(root.node("arena", "restore", "defer-near-player").virtual(), "the retired key must not be in the bundled stub");
     }
 
     @Test
