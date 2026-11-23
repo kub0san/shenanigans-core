@@ -474,6 +474,7 @@ class ArenaRestoreEngineTest {
         assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(31, 15)));
         assertTrue(engine.restoreStep(null), "the load failure ends the restore");
         assertTrue(engine.restoreFailed());
+        assertFalse(engine.isRestoring(), "a failed engine must report stopped so readiness must not wait forever");
         assertEquals(0, engine.progressPercent(), "a failed restore never reports 100%");
 
         while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
@@ -1238,5 +1239,35 @@ class ArenaRestoreEngineTest {
                         && r.getMessage().toString().contains("bounded trusted-diff check"))
                 .count();
         assertEquals(1, boundedWarnings, "one warning per chunk across all resumable slices");
+    }
+
+    // ------------------------------------------ full-restore readiness premise (issue #7)
+
+    /**
+     * Issue #7: readiness must not open deploy while writes are pending. With one cell per slice
+     * the engine stays in flight (and below 100%) until every ledger position is written; the
+     * controller's completion gate keys on exactly this terminal state. Post-#6 fixture: no
+     * player injection, no deferral internals — just the bounded write path.
+     */
+    @Test
+    void unwrittenCellsKeepTheRestoreInFlightUntilDone() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine engine = engine(fx, policy(1, false, false), SYNC, OK_LOADER, STONE);
+        Set<Long> all = set(BlockKey.pack(1, 60, 1), BlockKey.pack(10, 60, 10));
+
+        assertTrue(engine.beginRestore(region(), "ffa", diff(all), stoneChunks(15, 15)));
+        engine.restoreStep(null);
+
+        assertTrue(engine.isRestoring(), "one cell per slice: the second write is still pending");
+        assertTrue(engine.progressPercent() < 100, "no premature 100% while a cell is unwritten");
+        assertEquals(1, fx.writes.size(), "the first slice writes exactly one cell");
+
+        drive(engine);
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(100, engine.progressPercent());
+        assertEquals(all, Set.copyOf(fx.writes));
+        assertEquals(all.size(), fx.writes.size(), "every position written exactly once");
     }
 }
