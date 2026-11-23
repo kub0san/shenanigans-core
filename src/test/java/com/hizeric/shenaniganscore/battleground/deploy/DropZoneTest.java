@@ -503,4 +503,35 @@ class DropZoneTest {
                         && selection.candidate().z() >= 10 && selection.candidate().z() <= 12,
                 "the selected spot lies in the patch");
     }
+
+    @Test
+    void hasThinFloorDetectsOneLayerFloor() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) probe.set(x, 30, z, Block.SOLID);
+        }
+
+        assertTrue(DropZone.hasThinFloor(probe, -4, 4, -4, 4, 30, 1),
+                "a one-layer floor must be detected");
+    }
+
+    @Test
+    void hasThinFloorIgnoresSupportedFloor() {
+        FakeProbe probe = new FakeProbe();
+        probe.slab(-4, 4, -4, 4, 30);
+
+        assertFalse(DropZone.hasThinFloor(probe, -4, 4, -4, 4, 30, 1),
+                "a floor with a support layer is not thin");
+    }
+
+    @Test
+    void hasThinFloorIgnoresLiquidSurface() {
+        FakeProbe probe = new FakeProbe();
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) probe.set(x, 30, z, Block.LIQUID);
+        }
+
+        assertFalse(DropZone.hasThinFloor(probe, -4, 4, -4, 4, 30, 1),
+                "a liquid surface is not a thin solid floor");
+    }
 }
