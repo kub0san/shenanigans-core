@@ -35,20 +35,25 @@ class DashAnimationTest {
 
         assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(0));
         assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(1));
-        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(2));
-        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(3));
-        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(18));
+        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(2));
+        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(3));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(4));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(7));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(10));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(13));
+        assertTrue(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(16));
+        assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(17));
         assertFalse(DashAnimation.beat(DashAnimation.Kind.GHOST_ARC).fires(19));
     }
 
     @Test
-    void trailSpawnsOneEchoEveryTickFromOneToEighteen() {
+    void trailSpawnsOneEchoEveryThreeTicksFromOneToSixteen() {
         assertEquals(1, DashAnimation.GHOST_COUNT);
         List<DashAnimation.Frame> echoFrames = DashAnimation.trail().stream()
                 .filter(frame -> frame.spawns().stream()
                         .anyMatch(spawn -> spawn.kind() == DashAnimation.Kind.GHOST_ARC))
                 .toList();
-        assertEquals(List.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18),
+        assertEquals(List.of(1, 4, 7, 10, 13, 16),
                 echoFrames.stream().map(DashAnimation.Frame::tick).toList());
         echoFrames.forEach(frame -> frame.spawns().forEach(
                 spawn -> assertEquals(1, spawn.count())));
@@ -80,18 +85,17 @@ class DashAnimationTest {
     }
 
     @Test
-    void swingAndShakeAreOnTheExpectedTicks() {
+    void swingIsOnlyOnTickZeroAndNoLaunchFrameRequestsShake() {
         List<Integer> swings = DashAnimation.launch().stream()
                 .filter(DashAnimation.Frame::swing).map(DashAnimation.Frame::tick).toList();
-        List<Integer> shakes = DashAnimation.launch().stream()
-                .filter(DashAnimation.Frame::shake).map(DashAnimation.Frame::tick).toList();
+        assertTrue(DashAnimation.launch().stream().noneMatch(DashAnimation.Frame::shake),
+                "no launch frame may request a velocity shake");
         assertEquals(List.of(0), swings);
-        assertEquals(List.of(3, 6), shakes);
     }
 
     @Test
     void ghostScaleShrinksMonotonicallyToItsFloor() {
-        assertEquals(12, DashAnimation.GHOST_LIFE);
+        assertEquals(10, DashAnimation.GHOST_LIFE);
         assertEquals(1.0f, DashAnimation.ghostScale(0), 1.0e-6f);
         for (int age = 1; age <= DashAnimation.GHOST_LIFE; age++) {
             assertTrue(DashAnimation.ghostScale(age) < DashAnimation.ghostScale(age - 1),

@@ -16,7 +16,7 @@ public final class DashAnimation {
 
     public static final int TRAIL_TICKS = 28;
     public static final int GHOST_COUNT = 1;
-    public static final int GHOST_LIFE = 12;
+    public static final int GHOST_LIFE = 10;
     public static final double GHOST_ARC_RADIUS = 1.4;
 
     private static final Vector UP = new Vector(0, 1, 0);
@@ -50,7 +50,7 @@ public final class DashAnimation {
     private static final Map<Kind, Beat> BEATS = Map.of(
             Kind.CLEAVE_BURST, new Beat(Kind.CLEAVE_BURST, 0, 2, 1),
             Kind.RIFT_RIBBON, new Beat(Kind.RIFT_RIBBON, 1, 14, 1),
-            Kind.GHOST_ARC, new Beat(Kind.GHOST_ARC, 1, 18, 1),
+            Kind.GHOST_ARC, new Beat(Kind.GHOST_ARC, 1, 16, 3),
             Kind.WIND_CHARGE, new Beat(Kind.WIND_CHARGE, 0, 6, 3));
 
     private static final List<Sound> SOUNDS = List.of(
@@ -71,12 +71,12 @@ public final class DashAnimation {
         return candidate.normalize();
     }
 
-    /** Ghost blades shrink over their lifetime and never disappear abruptly. */
+    /** Pure-data shrink curve retained for data/tests; echoes themselves stay full size. */
     public static float ghostScale(int age) {
         return (float) Math.max(0.05, 1.0 - age / (double) GHOST_LIFE);
     }
 
-    /** Launch timeline: cleave, rift ribbon, wind-charge rings, sounds and shake (ticks 0–20). */
+    /** Launch timeline: cleave, rift ribbon, wind-charge rings and sounds (ticks 0–20). */
     public static List<Frame> launch() {
         Beat cleave = beat(Kind.CLEAVE_BURST);
         Beat rift = beat(Kind.RIFT_RIBBON);
@@ -90,7 +90,7 @@ public final class DashAnimation {
             final int currentTick = tick;
             List<Sound> sounds = SOUNDS.stream().filter(sound -> sound.tick() == currentTick).toList();
             frames.add(new Frame(tick, List.copyOf(spawns), sounds,
-                    tick == 0, tick == 3 || tick == 6));
+                    tick == 0, false));
         }
         return List.copyOf(frames);
     }

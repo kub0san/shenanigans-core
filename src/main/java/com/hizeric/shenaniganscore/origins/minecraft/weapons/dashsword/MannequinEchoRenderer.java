@@ -2,7 +2,6 @@ package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 
 import com.destroystokyo.paper.profile.ProfileProperty;
 import com.github.retrooper.packetevents.PacketEvents;
-import com.github.retrooper.packetevents.protocol.attribute.Attributes;
 import com.github.retrooper.packetevents.protocol.component.builtin.item.ItemProfile;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
@@ -13,7 +12,6 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateAttributes;
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.network.PacketEventsBridge;
 import io.github.retrooper.packetevents.util.SpigotReflectionUtil;
@@ -39,9 +37,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Packet-only mannequin afterimages for the Rift Cleave dash trail.
  *
  * <p>Each dash owns one renderer. It spawns {@code minecraft:mannequin} entities with the caster's
- * live skin, makes them invisible + glowing so only a white outline renders (no translucent body),
- * and drives {@code minecraft:scale} down with {@link DashAnimation#ghostScale(int)} until the echo
- * ages out. Nothing here touches Bukkit display entities or the player's real profile.</p>
+ * live skin, makes them invisible + glowing so only a white outline renders (no translucent body).
+ * Echoes stay at full size and simply despawn when they reach {@link DashAnimation#GHOST_LIFE}.
+ * Nothing here touches Bukkit display entities or the player's real profile.</p>
  *
  * <p>All PacketEvents access goes through {@link PacketEventsBridge}; this class never calls
  * {@code setAPI}. Fake entities are client-side packets only, so every viewer needs its own spawn,
@@ -109,21 +107,15 @@ public final class MannequinEchoRenderer {
         }
     }
 
-    /** Shrink live echoes and drop the ones that reached {@link DashAnimation#GHOST_LIFE}. */
+    /** Drop the echoes that reached {@link DashAnimation#GHOST_LIFE}; survivors stay full size. */
     public void tick(int currentTick) {
         if (closed || !PacketEventsBridge.isReady()) return;
         syncViewers();
         for (Iterator<Echo> it = echoes.values().iterator(); it.hasNext(); ) {
             Echo echo = it.next();
-            int age = currentTick - echo.bornTick;
-            if (age >= DashAnimation.GHOST_LIFE) {
+            if (currentTick - echo.bornTick >= DashAnimation.GHOST_LIFE) {
                 despawn(echo);
                 it.remove();
-                continue;
-            }
-            echo.scale = DashAnimation.ghostScale(age);
-            for (Viewer viewer : viewers.values()) {
-                sendScale(viewer.player, echo);
             }
         }
     }
@@ -228,7 +220,6 @@ public final class MannequinEchoRenderer {
         send(player, new WrapperPlayServerSpawnEntity(echo.id, Optional.of(echo.uuid),
                 EntityTypes.MANNEQUIN, new Vector3d(echo.x, echo.y, echo.z),
                 echo.pitch, echo.yaw, echo.yaw, 0, Optional.empty()));
-        sendScale(player, echo);
     }
 
     private void sendMeta(Player player, Echo echo) {
@@ -244,12 +235,6 @@ public final class MannequinEchoRenderer {
                 new EntityData<Optional<Component>>(19, EntityDataTypes.OPTIONAL_ADV_COMPONENT,
                         Optional.empty()));
         send(player, new WrapperPlayServerEntityMetadata(echo.id, meta));
-    }
-
-    private void sendScale(Player player, Echo echo) {
-        send(player, new WrapperPlayServerUpdateAttributes(echo.id,
-                List.of(new WrapperPlayServerUpdateAttributes.Property(
-                        Attributes.SCALE, echo.scale, List.of()))));
     }
 
     private void sendTeam(Player player, WrapperPlayServerTeams.TeamMode mode, String entity) {
@@ -293,7 +278,6 @@ public final class MannequinEchoRenderer {
         final double x, y, z;
         final float yaw, pitch;
         final int bornTick;
-        float scale = 1.0f;
 
         Echo(int id, UUID uuid, double x, double y, double z, float yaw, float pitch, int bornTick) {
             this.id = id;
