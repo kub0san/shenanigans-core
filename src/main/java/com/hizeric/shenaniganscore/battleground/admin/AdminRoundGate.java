@@ -25,6 +25,19 @@ public final class AdminRoundGate {
     }
 
     public static Result decide(Action action, RoundState state, boolean arenaCaptured, int seconds) {
+        return decide(action, state, arenaCaptured, false, seconds);
+    }
+
+    /**
+     * Issue #7: an admin force-ready must not bypass the full-restore gate. While a restore is
+     * still in flight the arena can look IDLE, so START is denied with a reason instead of
+     * reporting a start that never happened.
+     */
+    public static Result decide(Action action, RoundState state, boolean arenaCaptured,
+                                boolean restoreInFlight, int seconds) {
+        if (action == Action.START && restoreInFlight) {
+            return Result.deny("The arena is still restoring.");
+        }
         return switch (action) {
             case START -> decideStart(state, arenaCaptured);
             case PAUSE, STOP -> decideStop(state);

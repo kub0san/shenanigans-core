@@ -45,10 +45,13 @@ final class RoundController {
     /** One-shot tier-1 gate, rearmed exactly once per {@link #beginReset()}. */
     private final TierOneGate tierOneGateConsumed = new TierOneGate();
 
+    /** Issue #7: deploy opens only when the FULL restore finishes, never at the tier-1 gate. */
+    private final RoundReadiness readiness = new RoundReadiness();
+
     /**
      * The restore engine can fire the tier-1 gate synchronously from {@code beginRestore} when the
-     * diff is empty, and again when tier 2 finishes. Only the first call for a generation may
-     * advance the round (and open the diff ledger).
+     * diff is empty. Only the first call for a generation may broadcast tier-1 status; the round
+     * transition itself belongs to {@link #completeRestoreAndOpenRound(boolean)} (issue #7).
      */
     static final class TierOneGate {
         private boolean consumed;
@@ -111,6 +114,14 @@ final class RoundController {
     private void tickRestore() {
         if (m.restoreEngine == null || !m.restoreEngine.isRestoring()) {
             stopRestoreTask();
+            // fail()/cancelTierTwo() can stop the engine from a load callback without another
+            // restoreStep() return; a stranded STAGING/RESTORING round must still open deploy.
+            if (m.state == RoundState.STAGING || m.state == RoundState.RESTORING) {
+                boolean failed = m.restoreEngine != null
+                        && RoundGates.restoreNotice(m.restoreEngine.restoreFailed())
+                        == RoundGates.RestoreNotice.FAILED;
+                completeRestoreAndOpenRound(failed);
+            }
             return;
         }
         m.budget.beginTick();
@@ -166,6 +177,7 @@ final class RoundController {
         if (m.state == RoundState.RESTORING) return;
         m.state = RoundState.STAGING;
         tierOneGateConsumed.reset(); // one gate per reset generation
+        readiness.reset();
 
         // Round end: pull every deployed player back to the hub — including one mid-fight or
         // mid-dive — and clear their dive/lock state so nothing holds them in the arena.
@@ -206,14 +218,15 @@ final class RoundController {
         m.economy.rollNewRound();
 
         flushDiffLedger(m.arenaStore.activeMapId());
-        if (startTieredRestore(m.arenaStore.activeMapId(),
-                readDiffLog(m.arenaStore.activeMapId()), false)) {
+        DiffLog.Decoded diff = readDiffLog(m.arenaStore.activeMapId());
+        if (startTieredRestore(m.arenaStore.activeMapId(), diff, false)) {
             m.announce("<gray>Restoring arena… <white>Shop is open.");
             return;
         }
-        // No tiered restore available: fall back to a safe ready state.
-        onTierOneGateOpen();
-        onRestoreComplete();
+        // No tiered restore ran: only an absent log or an empty, flushed diff is clean. Recorded
+        // positions or an incomplete ledger are unrestored work and must not be announced as ready.
+        boolean dirty = diff != null && (!diff.complete() || !diff.positions().isEmpty());
+        completeRestoreAndOpenRound(dirty);
     }
 
     /**
@@ -281,31 +294,33 @@ final class RoundController {
                     safeDiff.positions(), safeDiff.problem());
         }
         m.restoreEngine.mapId(mapId);
-        // Set STAGING before beginRestore(): an empty diff fires the tier-1 gate synchronously,
-        // and the old order overwrote the RUNNING state the gate had just installed.
+        // Set STAGING before beginRestore(): an empty diff fires the tier-1 gate synchronously
+        // from inside beginRestore, and the round must already be staged when it does.
         m.state = RoundState.STAGING;
         boolean started = m.restoreEngine.beginRestore(region, mapId, safeDiff, snapshot);
         if (started) {
-            // Tier 1 still pending: RESTORING is the live state that disables Deploy in the hub.
-            // If the gate already fired synchronously it consumed its token and moved us to RUNNING.
-            if (!tierOneGateConsumed.consumed()) m.state = RoundState.RESTORING;
+            // Tier 2 is in flight whenever beginRestore succeeded, so RESTORING is always the live
+            // state that disables Deploy in the hub. The tier-1 callback is status-only (issue #7):
+            // a synchronous empty-diff gate consumes its one-shot without moving the round to
+            // RUNNING, and joining players must hear about the verification and block writes.
+            m.state = RoundState.RESTORING;
             startRestoreTask();
         }
         return started;
     }
 
-    /** Called by the restore engine when tier 1 completes (and by recovery fallbacks). */
+    /** Called by the restore engine when tier 1 completes: status only, never opens deploy. */
     void onTierOneGateOpen() {
         if (!tierOneGateConsumed.tryOpen()) return;
-        if (!beginRound("<green>Round <white>" + (m.roundNumber + 1)
-                + "<green> is ready — deploy with /battleground join")) return;
-        m.announce(m.economy.roundSummary());
+        if (readiness.onTierOneDone() == RoundReadiness.Outcome.ANNOUNCE_PENDING) {
+            m.announce(RoundReadiness.statusAnnouncement());
+        }
     }
 
     /**
-     * Shared round-start invariants used by tier-1 completion, admin START and the IDLE deploy
-     * fallback. Increments the round counter, resets the clock, opens the diff ledger, prewarms
-     * the next map and moves the battleground into RUNNING.
+     * Shared round-start invariants used by full-restore completion, admin START and the IDLE
+     * deploy fallback. Increments the round counter, resets the clock, opens the diff ledger,
+     * prewarms the next map and moves the battleground into RUNNING.
      */
     boolean beginRound(String announcement) {
         if (isRunningLike()) return false;
@@ -321,14 +336,24 @@ final class RoundController {
     private void onRestoreComplete() {
         stopRestoreTask();
         reloadProtectionNoRescan(m.arenaStore.activeMapId());
-        if (m.restoreEngine != null && RoundGates.restoreNotice(m.restoreEngine.restoreFailed())
-                == RoundGates.RestoreNotice.FAILED) {
-            m.announce("<red>Restore failed — the arena may be dirty. "
-                    + "Restoration will be retried next round.");
-        }
-        // If the tier 1 gate never opened (failure before gate), ensure we don't strand.
-        if (m.state == RoundState.STAGING || m.state == RoundState.RESTORING) {
-            onTierOneGateOpen();
+        boolean failed = m.restoreEngine != null
+                && RoundGates.restoreNotice(m.restoreEngine.restoreFailed())
+                == RoundGates.RestoreNotice.FAILED;
+        completeRestoreAndOpenRound(failed);
+    }
+
+    /**
+     * Issue #7: the sole round transition on the restore path. Deploy opens only when the FULL
+     * restore reaches its terminal state — clean or dirty — never at the tier-1 gate. A dirty
+     * open warns instead of claiming ready; failure is not a strand.
+     */
+    void completeRestoreAndOpenRound(boolean failed) {
+        RoundReadiness.Outcome outcome = readiness.onRestoreFinished(failed);
+        if (outcome == RoundReadiness.Outcome.NONE) return;
+        int roundNumber = m.roundNumber + 1; // beginRound() increments the counter
+        if (!beginRound(RoundReadiness.announcement(roundNumber, failed))) return;
+        if (outcome == RoundReadiness.Outcome.OPEN_CLEAN) {
+            m.announce(m.economy.roundSummary());
         }
     }
 
@@ -416,7 +441,8 @@ final class RoundController {
         }
         var region = m.arenaStore.region();
         boolean captured = region != null && region.isCaptured();
-        AdminRoundGate.Result result = AdminRoundGate.decide(action, m.state, captured, requestedSeconds);
+        boolean restoring = m.restoreEngine != null && m.restoreEngine.isRestoring();
+        AdminRoundGate.Result result = AdminRoundGate.decide(action, m.state, captured, restoring, requestedSeconds);
         if (!result.allowed()) return result;
         switch (result.effect()) {
             case START -> forceStart();
@@ -487,6 +513,8 @@ final class RoundController {
         if (unflushed) {
             m.plugin.getLogger().warning("Unflushed arena diff detected for map '" + mapId
                     + "'; verifying against snapshot and restoring untrusted chunks.");
+            tierOneGateConsumed.reset();
+            readiness.reset();
             m.state = RoundState.STAGING;
             m.deployed.clear();
             m.dives.clear();
@@ -501,8 +529,7 @@ final class RoundController {
             }
             m.plugin.getLogger().warning("Arena recovery could not start for map '" + mapId
                     + "'; starting a fresh round without auto-capture.");
-            onTierOneGateOpen();
-            onRestoreComplete();
+            completeRestoreAndOpenRound(true);
             return;
         }
         beginReset();
