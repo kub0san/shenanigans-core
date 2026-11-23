@@ -3,28 +3,36 @@ package com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword;
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.battleground.BattlegroundManager;
 import com.hizeric.shenaniganscore.battleground.RoundState;
+import com.hizeric.shenaniganscore.core.display.BlockDisplayOps;
+import com.hizeric.shenaniganscore.core.display.CameraShake;
+import com.hizeric.shenaniganscore.core.display.DisplayRig;
 import com.hizeric.shenaniganscore.core.display.DisplayUtils;
+import com.hizeric.shenaniganscore.core.display.LightingRig;
+import com.hizeric.shenaniganscore.core.display.TechniqueDisplayOps;
+import com.hizeric.shenaniganscore.core.display.TechniqueLighting;
+import com.hizeric.shenaniganscore.core.display.TitleAnimator;
 import com.hizeric.shenaniganscore.core.display.TransformUtils;
 import com.hizeric.shenaniganscore.core.sound.SoundUtils;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Thin Bukkit display driver for the Executioner's Sword: a heavy uppercut slash and the
@@ -33,8 +41,6 @@ import java.util.List;
 public final class ExecutionerSwordEffect {
 
     public static final int CUTSCENE_TICKS = 24;
-
-    private static final MiniMessage MM = MiniMessage.miniMessage();
 
     private ExecutionerSwordEffect() { }
 
@@ -85,13 +91,23 @@ public final class ExecutionerSwordEffect {
 
     // ================================================================== uppercut timeline
 
+    private static final org.bukkit.block.data.BlockData BLADE_CORE =
+            Material.WHITE_CONCRETE.createBlockData();
+    private static final org.bukkit.block.data.BlockData BLADE_GLOW =
+            Material.RED_STAINED_GLASS.createBlockData();
+    private static final Particle.DustOptions CRIMSON_DUST =
+            new Particle.DustOptions(Color.fromRGB(150, 0, 12), 1.2f);
+
     private static final class UppercutTimeline extends BukkitRunnable {
         private final ShenanigansCore plugin;
         private final Player caster;
         private final LivingEntity target;
 
-        private ItemDisplay blade;
-        private BlockDisplay ring;
+        // Two-layer main blade: white-hot core + wider red-glass glow.
+        private BlockDisplay core;
+        private BlockDisplay glow;
+        // Cross accent at contact (two short blades).
+        private final List<BlockDisplay> crossBlades = new ArrayList<>();
 
         private int tick;
 
@@ -100,35 +116,41 @@ public final class ExecutionerSwordEffect {
             this.caster = caster;
             this.target = target;
 
-            Location base = target.getLocation().clone();
-            Vector forward = base.getDirection().clone();
-            forward.setY(0);
-            if (forward.lengthSquared() < 1.0e-6) forward = new Vector(0, 0, 1);
-            forward.normalize();
+            // Anchor at the target's chest, pushed ~0.5 blocks along its facing.
+            Location chest = chestAnchor();
+            Vector forward = horizontalForward();
 
-            Color gold = Color.fromRGB(255, 215, 0);
-
-            DisplayUtils.Options bladeOpts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
+            DisplayUtils.Options coreOpts = DisplayUtils.Options.builder()
+                    .viewRange(8.0f)
                     .brightness(15)
                     .interpolation(0, 1)
                     .teleportDuration(1)
-                    .glowColor(gold)
+                    .glowColor(Color.WHITE)
                     .glowing(true)
                     .build();
-            Location bladeLoc = base.clone().add(forward.clone().multiply(0.6)).add(0, 0.6, 0);
-            blade = DisplayUtils.spawnItem(bladeLoc, new ItemStack(Material.NETHERITE_SWORD), bladeOpts);
+            core = DisplayUtils.spawnBlock(chest, BLADE_CORE, coreOpts);
 
-            DisplayUtils.Options ringOpts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
+            DisplayUtils.Options glowOpts = DisplayUtils.Options.builder()
+                    .viewRange(8.0f)
                     .brightness(15)
                     .interpolation(0, 1)
                     .teleportDuration(1)
-                    .glowColor(gold)
+                    .glowColor(Color.fromRGB(200, 20, 20))
                     .glowing(true)
                     .build();
-            Location ringLoc = base.clone().add(0, 0.05, 0);
-            ring = DisplayUtils.spawnBlock(ringLoc, Material.GOLD_BLOCK, ringOpts);
+            glow = DisplayUtils.spawnBlock(chest, BLADE_GLOW, glowOpts);
+
+            // Orient both layers down the target's forward: local +Z is the blade length.
+            Vector3f initialDir = new Vector3f((float) forward.getX(), 0f, (float) forward.getZ());
+            Vector3f pivot = new Vector3f(0.5f, 0.5f, 0.5f);
+            TransformUtils.applyFacing(core, new Vector3f(0.05f, 0.05f, 1.4f), initialDir, pivot, 1);
+            TransformUtils.applyFacing(glow, new Vector3f(0.25f, 0.25f, 1.4f), initialDir, pivot, 1);
+
+            // Cross accent at contact: two short blades at base forward ±55°.
+            Vector leftDir = rotateY(forward, 55.0);
+            Vector rightDir = rotateY(forward, -55.0);
+            spawnCrossBlade(chest, leftDir, coreOpts, glowOpts);
+            spawnCrossBlade(chest, rightDir, coreOpts, glowOpts);
         }
 
         @Override
@@ -142,68 +164,173 @@ public final class ExecutionerSwordEffect {
                 return;
             }
 
-            Location base = target.getLocation().clone();
-            Vector forward = base.getDirection().clone();
-            forward.setY(0);
-            if (forward.lengthSquared() < 1.0e-6) forward = new Vector(0, 0, 1);
-            forward.normalize();
+            World world = target.getWorld();
+            Location chest = chestAnchor();
+            Vector forward = horizontalForward();
 
-            // Blade sweeps upward across target's front.
-            Location bladeLoc = base.clone()
-                    .add(forward.clone().multiply(0.6))
-                    .add(0, 0.6 + tick * 0.12, 0);
-            if (blade != null && blade.isValid()) {
-                blade.teleport(bladeLoc);
-                TransformUtils.applyFacing(blade,
-                        new Vector3f(2.5f, 2.5f, 2.5f),
-                        new Vector3f(0.3f, 1.0f, 0.0f),
-                        new Vector3f(0.5f, 0.5f, 0.5f), 1);
+            if (tick == 0) {
+                // Camera kick once on hit.
+                CameraShake.start(plugin, caster, 6, 1.2f);
             }
 
-            // Ring expands 0.6 -> 1.4 over 6 ticks then fades.
-            Location ringLoc = base.clone().add(0, 0.05, 0);
-            if (ring != null && ring.isValid()) {
-                ring.teleport(ringLoc);
-                float s;
-                if (tick < 6) {
-                    s = 0.6f + (0.8f) * (tick / 6.0f);
-                } else {
-                    float fade = 1.0f - (tick - 6) / 4.0f;
-                    if (fade < 0.02f) fade = 0.02f;
-                    s = 1.4f * fade;
-                    if (s < 0.02f) s = 0.02f;
+            // ── Blade sweep: -34° → +34° around the forward over ticks 0..4 ──
+            if (tick <= 4) {
+                double t = tick / 4.0;
+                double angle = -34.0 + 68.0 * t;       // -34° → +34°
+                double length = 1.4 + 0.6 * t;         // 1.4 → 2.0
+                Vector dir = rotateY(forward, angle);
+                poseLayer(core, chest, dir, length, 0.05f);
+                poseLayer(glow, chest, dir, length, 0.25f);
+            } else if (tick <= 6) {
+                // Thin both layers toward 0.02 over 2 ticks, then they are removed.
+                float thin = 0.05f - (0.05f - 0.02f) * (tick - 4) / 2.0f;
+                Vector dir = rotateY(forward, 34.0);
+                poseLayer(core, chest, dir, 2.0, thin);
+                poseLayer(glow, chest, dir, 2.0, thin * 5.0f);
+            }
+
+            // ── Rising crimson dust helix for ticks 0..7 ──
+            if (tick <= 7) {
+                double y = chest.getY() - 0.9 + 0.2 + tick * 0.16; // relative to feet-ish origin
+                for (int i = 0; i < 2; i++) {
+                    double a = (tick * 0.7) + i * Math.PI;
+                    double x = chest.getX() + Math.cos(a) * 0.55;
+                    double z = chest.getZ() + Math.sin(a) * 0.55;
+                    world.spawnParticle(Particle.DUST, x, y, z, 1, 0, 0, 0, 0, CRIMSON_DUST);
                 }
-                TransformUtils.applyTransform(ring, s, 0.05f, s, 0f, 0f, 0f, 1);
+            }
+
+            // ── Cross accent: fade/remove by tick 6 ──
+            if (tick >= 4) {
+                fadeCross(tick);
             }
 
             tick++;
         }
 
+        // ---- helpers ----
+
+        private Location chestAnchor() {
+            return target.getLocation().clone().add(0, 0.9, 0);
+        }
+
+        private Vector horizontalForward() {
+            Vector forward = target.getLocation().getDirection().clone();
+            forward.setY(0);
+            if (forward.lengthSquared() < 1.0e-6) forward = new Vector(0, 0, 1);
+            forward.normalize();
+            return forward;
+        }
+
+        /** Rotate a horizontal vector around the Y axis by {@code degrees}. */
+        private static Vector rotateY(Vector v, double degrees) {
+            double r = Math.toRadians(degrees);
+            double cos = Math.cos(r);
+            double sin = Math.sin(r);
+            double x = v.getX() * cos - v.getZ() * sin;
+            double z = v.getX() * sin + v.getZ() * cos;
+            return new Vector(x, 0, z);
+        }
+
+        private void poseLayer(BlockDisplay display, Location chest, Vector dir,
+                               double length, float thickness) {
+            if (display == null || !display.isValid()) return;
+            // Anchor at the target's chest, pushed ~0.5 blocks along its facing.
+            Location anchor = chest.clone().add(dir.clone().multiply(0.5));
+            display.teleport(anchor);
+            TransformUtils.applyFacing(display,
+                    new Vector3f(thickness, thickness, (float) length),
+                    new Vector3f((float) dir.getX(), 0f, (float) dir.getZ()),
+                    new Vector3f(0.5f, 0.5f, 0.5f), 1);
+        }
+
+        private void spawnCrossBlade(Location chest, Vector dir,
+                                     DisplayUtils.Options coreOpts,
+                                     DisplayUtils.Options glowOpts) {
+            BlockDisplay c = DisplayUtils.spawnBlock(chest, BLADE_CORE, coreOpts);
+            BlockDisplay g = DisplayUtils.spawnBlock(chest, BLADE_GLOW, glowOpts);
+            crossBlades.add(c);
+            crossBlades.add(g);
+            poseLayer(c, chest, dir, 0.9, 0.05f);
+            poseLayer(g, chest, dir, 0.9, 0.25f);
+        }
+
+        private void fadeCross(int t) {
+            float f = 1.0f - (t - 4) / 2.0f; // 1.0 at t4 → 0.0 at t6
+            if (f < 0.02f) f = 0.02f;
+            for (BlockDisplay bd : crossBlades) {
+                if (bd == null || !bd.isValid()) continue;
+                org.bukkit.util.Transformation tr = bd.getTransformation();
+                Vector3f s = new Vector3f(tr.getScale()).mul(f);
+                bd.setInterpolationDelay(0);
+                bd.setInterpolationDuration(1);
+                bd.setTransformation(new org.bukkit.util.Transformation(
+                        new Vector3f(tr.getTranslation()),
+                        tr.getLeftRotation(),
+                        s,
+                        tr.getRightRotation()));
+            }
+        }
+
         private void cleanup() {
-            if (blade != null && blade.isValid()) blade.remove();
-            if (ring != null && ring.isValid()) ring.remove();
-            blade = null;
-            ring = null;
+            if (core != null && core.isValid()) core.remove();
+            if (glow != null && glow.isValid()) glow.remove();
+            core = null;
+            glow = null;
+            for (BlockDisplay bd : crossBlades) {
+                if (bd != null && bd.isValid()) bd.remove();
+            }
+            crossBlades.clear();
         }
     }
 
     // ================================================================== execute timeline
 
     private static final class ExecuteTimeline extends BukkitRunnable {
+        private static final Vector3f PIVOT = new Vector3f(0.5f, 0.5f, 0.5f);
+        private static final Color RED_GLOW = Color.fromRGB(200, 20, 20);
+        private static final TextColor SEAL_TEXT = TextColor.color(139, 0, 0);
+        private static final double RING_RADIUS = 1.9;
+        private static final double RING_Y = 0.06;
+        private static final int RING_SEGMENTS = 24;
+        /** Cardinal unit offsets (x, z) for the four seal glyphs. */
+        private static final double[][] CARDINALS = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
+
+        /** One entity + fake-light registry so cleanup is a single pass. */
+        private static final class Rig implements DisplayRig, LightingRig {
+            private final List<Entity> entities = new ArrayList<>();
+            private final Map<Location, Integer> lights = new HashMap<>();
+
+            @Override
+            public List<Entity> entities() {
+                return entities;
+            }
+
+            @Override
+            public Map<Location, Integer> lights() {
+                return lights;
+            }
+        }
+
         private final ShenanigansCore plugin;
         private final Player caster;
         private final Player target;
         private final Vector savedVelocity;
         private final int savedNoDamageTicks;
         private final boolean roundActiveAtStart;
+        private final World world;
 
-        private final List<Entity> all = new ArrayList<>();
-        private final List<BlockDisplay> plates = new ArrayList<>();
-        private final List<ItemDisplay> ghosts = new ArrayList<>();
-        private final List<ItemDisplay> shards = new ArrayList<>();
+        private final Rig rig = new Rig();
 
-        private ItemDisplay guillotine;
-        private TextDisplay verdictText;
+        // Typed handles for per-beat animation (all also registered on the rig).
+        private final List<BlockDisplay> ring = new ArrayList<>();
+        private final List<TextDisplay> seals = new ArrayList<>();
+        private final List<BlockDisplay> bladeCores = new ArrayList<>();
+        private final List<BlockDisplay> bladeGlows = new ArrayList<>();
+        private final List<BlockDisplay> shards = new ArrayList<>();
+        private BlockDisplay cutCore;
+        private BlockDisplay cutGlow;
+        private boolean severed;
 
         private Location anchor;
         private boolean killed = false;
@@ -217,6 +344,7 @@ public final class ExecutionerSwordEffect {
             this.savedVelocity = savedVelocity;
             this.savedNoDamageTicks = savedNoDamageTicks;
             this.roundActiveAtStart = roundActiveAtStart;
+            this.world = target.getWorld();
             this.anchor = target.getLocation().clone();
         }
 
@@ -241,28 +369,52 @@ public final class ExecutionerSwordEffect {
             if (target.isOnline()) target.setVelocity(new Vector(0, 0, 0));
             if (tick < 6 && caster.isOnline()) caster.setVelocity(new Vector(0, 0, 0));
 
-            // spawns
-            if (tick == 0) spawnPlates();
-            if (tick == 4) spawnGhosts();
-            if (tick == 12) spawnGuillotine();
+            // ---- beats ----
+            if (tick == 0) {
+                spawnRing();
+                lightBurst(2.0);
+                SoundUtils.play(anchor.clone(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 0.6f, 0.5f);
+            }
+            if (tick == 2) {
+                spawnSeals();
+            }
+            if (tick == 4) {
+                spawnBlades();
+            }
+            if (tick == 12) {
+                spawnCut();
+                lightBurst(2.4);
+                SoundUtils.play(anchor.clone(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 0.7f);
+                CameraShake.start(plugin, caster, 5, 1.0f);
+            }
             if (tick == 14) {
-                spawnVerdictText();
+                resolveKill();
                 SoundUtils.play(anchor.clone(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.6f, 0.5f);
+                CameraShake.start(plugin, caster, 8, 1.8f);
             }
             if (tick == 16) {
-                resolveKill();
                 spawnShards();
-                SoundUtils.play(anchor.clone(), Sound.BLOCK_ANVIL_LAND, 1.0f, 0.8f);
+                for (BlockDisplay c : bladeCores) discard(c);
+                for (BlockDisplay g : bladeGlows) discard(g);
+                bladeCores.clear();
+                bladeGlows.clear();
+                lightBurst(1.2);
+                SoundUtils.play(anchor.clone(), Sound.BLOCK_ANVIL_LAND, 0.9f, 0.8f);
             }
             if (tick == 18) {
                 SoundUtils.play(anchor.clone(), Sound.ENTITY_ITEM_BREAK, 0.8f, 0.9f);
             }
+            if (tick == 20) {
+                for (TextDisplay s : seals) discard(s);
+                seals.clear();
+            }
 
-            // animate
-            animatePlates();
-            animateGhosts();
-            animateGuillotine();
-            animateVerdictText();
+            // ---- animate ----
+            animateRing();
+            animateSeals();
+            animateBlades();
+            animateCut();
+            if (tick >= 14 && tick <= 23) animateVerdict();
             animateShards();
 
             tick++;
@@ -272,106 +424,202 @@ public final class ExecutionerSwordEffect {
             }
         }
 
-        private void spawnPlates() {
-            Color crimson = Color.fromRGB(139, 0, 0);
-            DisplayUtils.Options opts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
-                    .brightness(15)
-                    .interpolation(0, 1)
-                    .teleportDuration(1)
-                    .glowColor(crimson)
-                    .glowing(true)
-                    .build();
-            for (int i = 0; i < 8; i++) {
-                double angle = (Math.PI * 2.0 * i) / 8.0;
-                Location loc = anchor.clone().add(Math.cos(angle) * 1.6, 0.05, Math.sin(angle) * 1.6);
-                BlockDisplay bd;
-                try {
-                    bd = DisplayUtils.spawnBlock(loc, Material.CRIMSON_ROOTS, opts);
-                } catch (IllegalArgumentException e) {
-                    bd = DisplayUtils.spawnBlock(loc, Material.BLACKSTONE, opts);
-                }
-                plates.add(bd);
-                all.add(bd);
-                TransformUtils.applyTransform(bd, 1.0f, 0.01f, 1.0f, 0f, 0f, 0f, 1);
+        // ---- spawns ----
+
+        private void spawnRing() {
+            for (int i = 0; i < RING_SEGMENTS; i++) {
+                boolean white = i % 3 == 0;
+                Material mat = white ? Material.WHITE_CONCRETE : Material.RED_STAINED_GLASS;
+                Color glow = white ? Color.WHITE : RED_GLOW;
+                double base = (Math.PI * 2.0 * i) / RING_SEGMENTS;
+                Location loc = anchor.clone().add(
+                        Math.cos(base) * RING_RADIUS, RING_Y, Math.sin(base) * RING_RADIUS);
+                BlockDisplay bd = DisplayUtils.spawnBlock(loc, mat, glowOpts(glow));
+                rig.entities().add(bd);
+                ring.add(bd);
+                Vector3f radial = new Vector3f((float) Math.cos(base), 0f, (float) Math.sin(base));
+                TransformUtils.applyFacing(bd, new Vector3f(0.05f, 0.03f, 0.5f), radial, PIVOT, 1);
             }
         }
 
-        private void spawnGhosts() {
-            Color red = Color.RED;
-            DisplayUtils.Options opts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
-                    .brightness(15)
-                    .interpolation(0, 1)
-                    .teleportDuration(1)
-                    .glowColor(red)
-                    .glowing(true)
-                    .build();
+        private void spawnSeals() {
+            for (double[] dir : CARDINALS) {
+                Location loc = anchor.clone().add(dir[0] * 2.2, 1.2, dir[1] * 2.2);
+                TextDisplay td = TechniqueDisplayOps.spawnGlyph(rig, loc, "斬", SEAL_TEXT, 0.6f);
+                seals.add(td);
+            }
+        }
+
+        private void spawnBlades() {
             for (int i = 0; i < 3; i++) {
-                double angle = (Math.PI * 2.0 * i) / 3.0;
-                double radius = 2.0;
-                Location loc = anchor.clone().add(Math.cos(angle) * radius, 1.0, Math.sin(angle) * radius);
-                ItemDisplay id = DisplayUtils.spawnItem(loc, new ItemStack(Material.NETHERITE_SWORD), opts);
-                ghosts.add(id);
-                all.add(id);
-                TransformUtils.applyTransform(id, 2.5f, 2.5f, 2.5f, 0f, 0f, 0f, 1);
+                double ang = (Math.PI * 2.0 * i) / 3.0;
+                Location loc = anchor.clone().add(Math.cos(ang) * 2.4, 1.0, Math.sin(ang) * 2.4);
+                BlockDisplay c = DisplayUtils.spawnBlock(loc, BLADE_CORE, glowOpts(Color.WHITE));
+                BlockDisplay g = DisplayUtils.spawnBlock(loc, BLADE_GLOW, glowOpts(RED_GLOW));
+                rig.entities().add(c);
+                rig.entities().add(g);
+                bladeCores.add(c);
+                bladeGlows.add(g);
+                Vector3f inward = new Vector3f((float) -Math.cos(ang), 0f, (float) -Math.sin(ang));
+                TransformUtils.applyFacing(c, new Vector3f(0.05f, 0.05f, 1.8f), inward, PIVOT, 1);
+                TransformUtils.applyFacing(g, new Vector3f(0.25f, 0.25f, 1.8f), inward, PIVOT, 1);
             }
         }
 
-        private void spawnGuillotine() {
-            Color red = Color.RED;
-            DisplayUtils.Options opts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
-                    .brightness(15)
-                    .interpolation(0, 1)
-                    .teleportDuration(1)
-                    .glowColor(red)
-                    .glowing(true)
-                    .build();
-            Location loc = anchor.clone().add(0, 3.0, 0);
-            guillotine = DisplayUtils.spawnItem(loc, new ItemStack(Material.NETHERITE_SWORD), opts);
-            all.add(guillotine);
-            TransformUtils.applyFacing(guillotine,
-                    new Vector3f(3.0f, 3.0f, 3.0f),
-                    new Vector3f(0.0f, -1.0f, 0.0f),
-                    new Vector3f(0.5f, 0.5f, 0.5f), 1);
-        }
-
-        private void spawnVerdictText() {
-            Color darkRed = Color.fromRGB(139, 0, 0);
-            DisplayUtils.Options opts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
-                    .brightness(15)
-                    .billboard(org.bukkit.entity.Display.Billboard.CENTER)
-                    .interpolation(0, 1)
-                    .teleportDuration(1)
-                    .glowColor(darkRed)
-                    .glowing(true)
-                    .build();
-            Component text = MM.deserialize("<dark_red><bold>VERDICT");
-            Location loc = anchor.clone().add(0, 2.5, 0);
-            verdictText = DisplayUtils.spawnText(loc, text, opts);
-            all.add(verdictText);
+        private void spawnCut() {
+            Location loc = anchor.clone().add(0, 1.0, 0);
+            cutCore = DisplayUtils.spawnBlock(loc, BLADE_CORE, glowOpts(Color.WHITE));
+            cutGlow = DisplayUtils.spawnBlock(loc, BLADE_GLOW, glowOpts(RED_GLOW));
+            rig.entities().add(cutCore);
+            rig.entities().add(cutGlow);
+            Vector right = rightVector();
+            Vector3f rd = new Vector3f((float) right.getX(), 0f, (float) right.getZ());
+            TransformUtils.applyFacing(cutCore, new Vector3f(0.06f, 0.06f, 0.4f), rd, PIVOT, 1);
+            TransformUtils.applyFacing(cutGlow, new Vector3f(0.30f, 0.30f, 0.4f), rd, PIVOT, 1);
         }
 
         private void spawnShards() {
-            Color red = Color.RED;
-            DisplayUtils.Options opts = DisplayUtils.Options.builder()
-                    .viewRange(12.0f)
-                    .brightness(15)
-                    .interpolation(0, 1)
-                    .teleportDuration(1)
-                    .glowColor(red)
-                    .glowing(true)
-                    .build();
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 12; i++) {
+                Color glow = (i % 2 == 0) ? Color.WHITE : RED_GLOW;
                 Location loc = anchor.clone().add(0, 1.0, 0);
-                ItemDisplay sh = DisplayUtils.spawnItem(loc, new ItemStack(Material.NETHERITE_SWORD), opts);
+                BlockDisplay sh = DisplayUtils.spawnBlock(loc, BLADE_CORE, glowOpts(glow));
+                rig.entities().add(sh);
                 shards.add(sh);
-                all.add(sh);
-                TransformUtils.applyTransform(sh, 0.4f, 0.4f, 0.4f, 0f, 0f, 0f, 1);
+                double ang = (Math.PI * 2.0 * i) / 12.0;
+                Vector3f radial = new Vector3f((float) Math.cos(ang), 0f, (float) Math.sin(ang));
+                TransformUtils.applyFacing(sh, new Vector3f(0.06f, 0.06f, 0.6f), radial, PIVOT, 1);
             }
         }
+
+        // ---- animation ----
+
+        private void animateRing() {
+            if (ring.isEmpty()) return;
+            double contraction;
+            if (tick < 18) {
+                contraction = 1.0;
+            } else {
+                contraction = Math.max(0.0, (24 - tick) / 6.0); // 1 at t18 → 0 at t24
+            }
+            double rot = Math.toRadians(tick * 0.6);
+            for (int i = 0; i < ring.size(); i++) {
+                BlockDisplay bd = ring.get(i);
+                if (bd == null || !bd.isValid()) continue;
+                double base = (Math.PI * 2.0 * i) / RING_SEGMENTS;
+                double ang = base + rot;
+                double r = RING_RADIUS * contraction;
+                Location loc = anchor.clone().add(Math.cos(ang) * r, RING_Y, Math.sin(ang) * r);
+                bd.teleport(loc);
+                Vector3f radial = new Vector3f((float) Math.cos(ang), 0f, (float) Math.sin(ang));
+                TransformUtils.applyFacing(bd, new Vector3f(0.05f, 0.03f, 0.5f), radial, PIVOT, 1);
+            }
+        }
+
+        private void animateSeals() {
+            if (seals.isEmpty()) return;
+            double p = clamp01((tick - 2) / 10.0); // converge t2 → t12
+            double chestY = anchor.getY() + 1.0;
+            double roll = Math.toRadians(tick * 4.0);
+            for (int i = 0; i < seals.size(); i++) {
+                TextDisplay td = seals.get(i);
+                if (td == null || !td.isValid()) continue;
+                double[] dir = CARDINALS[i];
+                double sx = anchor.getX() + dir[0] * 2.2;
+                double sz = anchor.getZ() + dir[1] * 2.2;
+                double x = sx + (anchor.getX() - sx) * p;
+                double z = sz + (anchor.getZ() - sz) * p;
+                Location to = new Location(world, x, anchor.getY() + 1.2 + (chestY - (anchor.getY() + 1.2)) * p, z);
+                TechniqueDisplayOps.moveDisplay(td, to, 0.6f, (float) roll);
+                if (tick >= 14) {
+                    double fp = clamp01((tick - 14) / 6.0); // fade t14 → t20
+                    td.setTextOpacity((byte) Math.max(0, Math.round(255 * (1.0 - fp))));
+                }
+            }
+        }
+
+        private void animateBlades() {
+            if (bladeCores.isEmpty()) return;
+            double p = clamp01((tick - 4) / 12.0); // orbit radius 2.4 → 0 over t4..t16
+            double radius = 2.4 * (1.0 - p);
+            for (int i = 0; i < bladeCores.size(); i++) {
+                BlockDisplay c = bladeCores.get(i);
+                BlockDisplay g = bladeGlows.get(i);
+                if (c == null || !c.isValid() || g == null || !g.isValid()) continue;
+                double ang = (Math.PI * 2.0 * i) / 3.0 + tick * 0.5;
+                double x = Math.cos(ang) * radius;
+                double z = Math.sin(ang) * radius;
+                Location loc = anchor.clone().add(x, 1.0, z);
+                c.teleport(loc);
+                g.teleport(loc);
+                Vector3f inward = new Vector3f((float) -Math.cos(ang), 0f, (float) -Math.sin(ang));
+                TransformUtils.applyFacing(c, new Vector3f(0.05f, 0.05f, 1.8f), inward, PIVOT, 1);
+                TransformUtils.applyFacing(g, new Vector3f(0.25f, 0.25f, 1.8f), inward, PIVOT, 1);
+            }
+        }
+
+        private void animateCut() {
+            if (cutCore == null || cutGlow == null) return;
+            if (!cutCore.isValid() || !cutGlow.isValid()) return;
+            float coreThick;
+            float glowThick;
+            float length;
+            if (tick <= 14) {
+                double p = clamp01((tick - 12) / 2.0); // grow 0.4 → 3.2 over 2 ticks
+                length = (float) (0.4 + (3.2 - 0.4) * p);
+                coreThick = 0.06f;
+                glowThick = 0.30f;
+            } else {
+                length = 3.2f;
+                double p = clamp01((tick - 14) / 2.0); // thin to 0.02 by t16
+                coreThick = (float) (0.06 + (0.02 - 0.06) * p);
+                glowThick = (float) (0.30 + (0.02 - 0.30) * p);
+            }
+            Location loc = anchor.clone().add(0, 1.0, 0);
+            cutCore.teleport(loc);
+            cutGlow.teleport(loc);
+            Vector right = rightVector();
+            Vector3f rd = new Vector3f((float) right.getX(), 0f, (float) right.getZ());
+            TransformUtils.applyFacing(cutCore,
+                    new Vector3f(coreThick, coreThick, length), rd, PIVOT, 1);
+            TransformUtils.applyFacing(cutGlow,
+                    new Vector3f(glowThick, glowThick, length), rd, PIVOT, 1);
+        }
+
+        private void animateVerdict() {
+            double elapsed = (tick - 14) / 20.0;
+            boolean last = tick >= 22;
+            var title = TitleAnimator.build("FINAL VERDICT", "終末の裁き", "Final Verdict", elapsed, last);
+            caster.showTitle(title);
+            for (Player pl : world.getPlayers()) {
+                if (pl.equals(caster)) continue;
+                if (pl.getLocation().distanceSquared(anchor) <= 144.0) {
+                    pl.showTitle(title);
+                }
+            }
+        }
+
+        private void animateShards() {
+            if (shards.isEmpty()) return;
+            if (tick >= 16 && tick <= 21) {
+                double p = clamp01((tick - 16) / 5.0); // radius 0 → 3 over 5 ticks
+                double radius = 3.0 * p;
+                for (int i = 0; i < shards.size(); i++) {
+                    BlockDisplay sh = shards.get(i);
+                    if (sh == null || !sh.isValid()) continue;
+                    double ang = (Math.PI * 2.0 * i) / 12.0;
+                    Location loc = anchor.clone().add(Math.cos(ang) * radius, 1.0, Math.sin(ang) * radius);
+                    sh.teleport(loc);
+                    Vector3f radial = new Vector3f((float) Math.cos(ang), 0f, (float) Math.sin(ang));
+                    TransformUtils.applyFacing(sh, new Vector3f(0.06f, 0.06f, 0.6f), radial, PIVOT, 1);
+                }
+            }
+            if (tick == 21 && !severed) {
+                severed = true;
+                for (BlockDisplay sh : shards) BlockDisplayOps.shrink(sh, 4);
+            }
+        }
+
+        // ---- gameplay / cleanup ----
 
         private void resolveKill() {
             killed = true;
@@ -389,157 +637,72 @@ public final class ExecutionerSwordEffect {
             }
         }
 
-        private double plateY(int t) {
-            if (t <= 16) return 0.05;
-            if (t <= 20) return 0.05 + (-0.35) * (t - 16) / 4.0;
-            return -0.3;
-        }
-
-        private float plateScaleY(int t) {
-            if (t <= 3) return 0.01f + 0.04f * (t / 3.0f);
-            if (t >= 20) {
-                float fade = 1.0f - (t - 20) / 4.0f;
-                if (fade < 0.0f) fade = 0.0f;
-                return 0.05f * fade + 0.01f;
-            }
-            return 0.05f;
-        }
-
-        private double ghostRadius(int t) {
-            if (t < 4) return 2.0;
-            if (t <= 11) return lerp(2.0, 1.2, (t - 4) / 7.0);
-            if (t <= 13) return lerp(1.2, 0.6, (t - 12) / 1.0);
-            if (t <= 16) return 0.6;
-            if (t <= 18) return lerp(0.6, 0.0, (t - 16) / 2.0);
-            return 0.0;
-        }
-
-        private double guillotineY(int t) {
-            if (t < 12) return 3.0;
-            if (t <= 13) return lerp(3.0, 2.2, (t - 12) / 1.0);
-            if (t <= 16) return 2.2;
-            if (t <= 18) return lerp(2.2, 1.0, (t - 16) / 2.0);
-            return 1.0;
-        }
-
-        private double shardRadius(int t) {
-            if (t < 16) return 0.0;
-            if (t <= 20) return 2.5 * (t - 16) / 4.0;
-            return 2.5;
-        }
-
-        private float shardScale(int t) {
-            if (t < 16) return 0.4f;
-            if (t <= 20) return 0.4f - 0.35f * (t - 16) / 4.0f;
-            float f = 1.0f - (t - 20) / 4.0f;
-            if (f < 0.0f) f = 0.0f;
-            return 0.05f * f;
-        }
-
-        private void animatePlates() {
-            for (int i = 0; i < plates.size(); i++) {
-                BlockDisplay bd = plates.get(i);
-                if (bd == null || !bd.isValid()) continue;
-                double angle = (Math.PI * 2.0 * i) / 8.0;
-                double y = plateY(tick);
-                Location loc = anchor.clone().add(Math.cos(angle) * 1.6, y, Math.sin(angle) * 1.6);
-                bd.teleport(loc);
-                float sy = plateScaleY(tick);
-                TransformUtils.applyTransform(bd, 1.0f, sy, 1.0f, 0f, 0f, 0f, 1);
-            }
-        }
-
-        private void animateGhosts() {
-            double r = ghostRadius(tick);
-            float sc;
-            if (tick < 20) {
-                sc = 2.5f;
-            } else {
-                float fade = 1.0f - (tick - 20) / 4.0f;
-                if (fade < 0.01f) fade = 0.01f;
-                sc = 2.5f * fade;
-                if (sc < 0.01f) sc = 0.01f;
-            }
-            for (int i = 0; i < ghosts.size(); i++) {
-                ItemDisplay id = ghosts.get(i);
-                if (id == null || !id.isValid()) continue;
-                double base = (Math.PI * 2.0 * i) / 3.0;
-                double angle = base + tick * 0.3;
-                Location loc = anchor.clone().add(Math.cos(angle) * r, 1.0, Math.sin(angle) * r);
-                id.teleport(loc);
-                TransformUtils.applyTransform(id, sc, sc, sc, 0f, 0f, 0f, 1);
-            }
-        }
-
-        private void animateGuillotine() {
-            if (guillotine == null || !guillotine.isValid()) return;
-            double y = guillotineY(tick);
-            Location loc = anchor.clone().add(0, y, 0);
-            guillotine.teleport(loc);
-            float sc;
-            if (tick < 20) {
-                sc = 3.0f;
-            } else {
-                float fade = 1.0f - (tick - 20) / 4.0f;
-                if (fade < 0.01f) fade = 0.01f;
-                sc = 3.0f * fade;
-                if (sc < 0.01f) sc = 0.01f;
-            }
-            TransformUtils.applyFacing(guillotine,
-                    new Vector3f(sc, sc, sc),
-                    new Vector3f(0.0f, -1.0f, 0.0f),
-                    new Vector3f(0.5f, 0.5f, 0.5f), 1);
-        }
-
-        private void animateVerdictText() {
-            if (verdictText == null || !verdictText.isValid()) return;
-            Location loc = anchor.clone().add(0, 2.5, 0);
-            verdictText.teleport(loc);
-            float sc;
-            if (tick <= 16) sc = 1.0f;
-            else if (tick <= 24) sc = 1.0f - (tick - 16) / 8.0f;
-            else sc = 0.0f;
-            if (sc < 0.01f) sc = 0.01f;
-            TransformUtils.applyTransform(verdictText, sc, sc, sc, 0f, 0f, 0f, 1);
-        }
-
-        private void animateShards() {
-            double r = shardRadius(tick);
-            float sc = shardScale(tick);
-            for (int i = 0; i < shards.size(); i++) {
-                ItemDisplay sh = shards.get(i);
-                if (sh == null || !sh.isValid()) continue;
-                double angle = (Math.PI * 2.0 * i) / 8.0;
-                Location loc = anchor.clone().add(Math.cos(angle) * r, 1.0, Math.sin(angle) * r);
-                sh.teleport(loc);
-                float s = sc;
-                if (s < 0.01f) s = 0.01f;
-                TransformUtils.applyTransform(sh, s, s, s, 0f, 0f, 0f, 1);
-            }
+        private void lightBurst(double radius) {
+            TechniqueLighting.setLightBurst(rig, world, anchor.clone().add(0, 1, 0), radius, 15);
         }
 
         private void cleanup() {
-            for (Entity e : all) {
+            for (Entity e : rig.entities()) {
                 if (e != null && e.isValid()) e.remove();
             }
-            all.clear();
-            plates.clear();
-            ghosts.clear();
-            shards.clear();
-            guillotine = null;
-            verdictText = null;
+            rig.entities().clear();
+            TechniqueLighting.setLights(rig.lights(), world, Map.of());
+            rig.lights().clear();
+
+            CameraShake.restore(caster);
 
             // restore target
             if (target.isOnline()) {
                 target.setVelocity(savedVelocity);
                 target.setNoDamageTicks(savedNoDamageTicks);
             }
+
+            ring.clear();
+            seals.clear();
+            bladeCores.clear();
+            bladeGlows.clear();
+            shards.clear();
+            cutCore = null;
+            cutGlow = null;
         }
 
-        private static double lerp(double a, double b, double t) {
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
-            return a + (b - a) * t;
+        // ---- small helpers ----
+
+        private static DisplayUtils.Options glowOpts(Color glow) {
+            return DisplayUtils.Options.builder()
+                    .viewRange(8.0f)
+                    .brightness(15)
+                    .interpolation(0, 1)
+                    .teleportDuration(1)
+                    .glowColor(glow)
+                    .glowing(true)
+                    .build();
+        }
+
+        private static void discard(Entity e) {
+            if (e == null) return;
+            if (e.isValid()) e.remove();
+        }
+
+        private static double clamp01(double v) {
+            if (v < 0) return 0;
+            if (v > 1) return 1;
+            return v;
+        }
+
+        /** Normalized horizontal caster→target direction. */
+        private Vector castToTarget() {
+            Vector f = target.getLocation().toVector().subtract(caster.getLocation().toVector());
+            f.setY(0);
+            if (f.lengthSquared() < 1.0e-6) f = new Vector(0, 0, 1);
+            f.normalize();
+            return f;
+        }
+
+        /** Horizontal right vector perpendicular to the caster→target direction. */
+        private Vector rightVector() {
+            Vector f = castToTarget();
+            return new Vector(-f.getZ(), 0, f.getX());
         }
     }
 }

@@ -36,6 +36,11 @@ class ExecutionerDefaultsTest {
     }
 
     @Test
+    void cutsceneLengthIsTwentyFourTicks() {
+        assertEquals(24, ExecutionerSwordEffect.CUTSCENE_TICKS);
+    }
+
+    @Test
     void priceIsFiveHundred() {
         assertEquals(500, ExecutionerSwordItem.PRICE);
     }

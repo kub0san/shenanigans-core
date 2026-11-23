@@ -38,8 +38,9 @@ public final class ExecutionerSwordHitListener implements Listener {
         armedUntil.put(player.getUniqueId(), System.currentTimeMillis() + ARM_DURATION_MS);
         SoundUtils.play(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.6f, 1.2f);
         // Arming is otherwise invisible: without this, both /ability 1 and /bg debug ability
-        // look like no-ops until the player happens to land a hit.
-        player.sendMessage(MM.deserialize(
+        // look like no-ops until the player happens to land a hit. Sent to the action bar so
+        // repeated debug casts do not spam chat.
+        player.sendActionBar(MM.deserialize(
                 "<dark_red><bold>EXECUTIONER'S SWORD ARMED <gray>- strike within 6s"));
     }
 
