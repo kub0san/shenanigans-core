@@ -285,6 +285,20 @@ class ArenaVerificationTest {
     }
 
     @Test
+    void sampledUnloggedChunkReportsDirtAtTheLastCell() {
+        ArenaSnapshot snapshot = largeChunk().snapshot;
+        int lastX = ArenaSnapshot.CHUNK_SIZE - 1; // (15, 91, 15) is the last cell of the 8192-cell chunk
+        int lastY = snapshot.maxY();
+        int lastZ = ArenaSnapshot.CHUNK_SIZE - 1;
+        ArenaVerification.StateProbe world = (x, y, z) ->
+                (x == lastX && y == lastY && z == lastZ) ? "minecraft:dirt" : snapshot.stateAt(x, y, z);
+
+        assertTrue(ArenaVerification.sampledUnloggedChunk(snapshot, CHUNK, world, Set.of(), 64)
+                .contains(BlockKey.pack(lastX, lastY, lastZ)),
+                "a dirt probe at the last sampled cell must be reported");
+    }
+
+    @Test
     void sampledUnloggedChunkOnEmptySnapshotReturnsEmpty() {
         ArenaVerification.StateProbe probe = (x, y, z) -> "minecraft:stone";
 
