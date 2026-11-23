@@ -26,6 +26,9 @@ import java.util.function.BooleanSupplier;
  */
 public final class ArenaVerification {
 
+    /** Upper bound on cell probes when the caller does not override the sample size. */
+    public static final int CHEAP_SAMPLE_CELLS = 64;
+
     /** Supplies the current world state string in the same form as {@code getAsString()}. */
     public interface StateProbe {
         String stateAt(int x, int y, int z);
@@ -80,6 +83,59 @@ public final class ArenaVerification {
         ChunkScan scan = new ChunkScan(snapshot, chunk);
         scan.step(world, ledger, mayContinue, 0);
         return scan.unlogged();
+    }
+
+    /**
+     * Bounded, read-only trusted-diff detector. Samples at most {@code sampleCells} evenly spaced
+     * cells in one chunk and returns the sampled positions where the world disagrees with the
+     * baseline and the ledger does not explain the difference. Cells are visited in the same
+     * Y, Z, X order as {@link ChunkScan}; the last cell is always sampled so a trailing anomaly is
+     * not lost to the stride arithmetic. One probe slot is reserved for that last cell, so a cell
+     * count that divides evenly by {@code sampleCells} cannot push the total past the bound.
+     *
+     * <p>This is a detector, not an exhaustive verdict: a clean result does not prove the chunk is
+     * trusted, because an anomaly between two sample points is missed by design. Callers must
+     * escalate any non-empty result to a full {@link ChunkScan} before acting on it. The scan never
+     * writes and never cancels events.</p>
+     */
+    public static Set<Long> sampledUnloggedChunk(ArenaSnapshot snapshot, ChunkPos chunk,
+                                                 StateProbe world, Set<Long> ledger,
+                                                 int sampleCells) {
+        Set<Long> unlogged = new LinkedHashSet<>();
+        if (snapshot == null || chunk == null || world == null) return unlogged;
+        int x0 = Math.max(snapshot.minX(), chunk.x() * ArenaSnapshot.CHUNK_SIZE);
+        int x1 = Math.min(snapshot.maxX(), chunk.x() * ArenaSnapshot.CHUNK_SIZE + ArenaSnapshot.CHUNK_SIZE - 1);
+        int z0 = Math.max(snapshot.minZ(), chunk.z() * ArenaSnapshot.CHUNK_SIZE);
+        int z1 = Math.min(snapshot.maxZ(), chunk.z() * ArenaSnapshot.CHUNK_SIZE + ArenaSnapshot.CHUNK_SIZE - 1);
+        if (x1 < x0 || z1 < z0) return unlogged;
+        Set<Long> logged = ledger == null ? Set.of() : ledger;
+        long spanX = (long) x1 - x0 + 1L;
+        long spanZ = (long) z1 - z0 + 1L;
+        long spanY = (long) snapshot.maxY() - snapshot.minY() + 1L;
+        long totalCells = spanX * spanZ * spanY;
+        int last = (int) (totalCells - 1L);
+        if (last < 0) return unlogged;
+        int budget = Math.max(1, sampleCells);
+        int stride = (int) Math.max(1L, totalCells / budget);
+        int probes = 0;
+        int index = 0;
+        for (int y = snapshot.minY(); y <= snapshot.maxY(); y++) {
+            for (int z = z0; z <= z1; z++) {
+                for (int x = x0; x <= x1; x++) {
+                    boolean sampled = index % stride == 0 || index == last;
+                    boolean room = index == last ? probes < budget : probes < budget - 1;
+                    if (sampled && room) {
+                        probes++;
+                        if (!Objects.equals(snapshot.stateAt(x, y, z), world.stateAt(x, y, z))) {
+                            long packed = BlockKey.pack(x, y, z);
+                            if (!logged.contains(packed)) unlogged.add(packed);
+                        }
+                    }
+                    index++;
+                }
+            }
+        }
+        return unlogged;
     }
 
     /**

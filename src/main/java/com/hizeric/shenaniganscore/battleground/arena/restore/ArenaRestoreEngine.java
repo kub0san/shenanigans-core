@@ -235,6 +235,12 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         untrusted.clear();
         scans.clear();
 
+        if (logger != null && diff.complete() && deps.policy().get().verify()) {
+            logger.info("Arena restore: committed diff for map '" + mapId + "' round "
+                    + diff.roundId() + " uses a bounded " + ArenaVerification.CHEAP_SAMPLE_CELLS
+                    + "-cell-per-chunk trusted-diff sample instead of an exhaustive cell scan.");
+        }
+
         Set<Long> essentials = TierOnePlanner.select(diff.positions(), snapshot);
         Map<ChunkPos, List<Long>> tierOneByChunk = groupByChunk(essentials);
         for (Map.Entry<ChunkPos, List<Long>> entry : tierOneByChunk.entrySet()) {
@@ -379,6 +385,10 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     @Override
     public boolean restoreFailed() { return queue.failed(); }
 
+    /**
+     * Verification-aware progress accounting is owned by issue #3. Do not add a competing metric
+     * here; this method intentionally keeps its written-ledger semantics until #3 lands.
+     */
     @Override
     public int progressPercent() {
         if (phase == Phase.DONE && !queue.failed()) return 100;
@@ -453,6 +463,34 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         boolean escalateToSnapshot = false;
         // An unflushed ledger is untrustworthy even when the verify toggle is off.
         boolean mustVerify = policy.verify() || (diff != null && !diff.complete());
+        if (mustVerify && !verified.contains(dispatch.pos())) {
+            if (diff != null && diff.complete() && diff.positions().isEmpty()) {
+                // A committed, empty ledger is authoritative: nothing to compare, so no probes.
+                scans.remove(dispatch.pos());
+                verified.add(dispatch.pos());
+            } else if (diff != null && diff.complete() && policy.verify()) {
+                Set<Long> sampled = ArenaVerification.sampledUnloggedChunk(snapshot, dispatch.pos(),
+                        (x, y, z) -> deps.stateProbe().at(world, x, y, z),
+                        diff.positions(), ArenaVerification.CHEAP_SAMPLE_CELLS);
+                if (sampled.isEmpty()) {
+                    // Committed ledger is authoritative for this chunk: no anomaly observed.
+                    scans.remove(dispatch.pos());
+                    verified.add(dispatch.pos());
+                } else {
+                    // PR #2's rule: an observed discrepancy is never written over without a full
+                    // comparison and, when enabled, snapshot fallback. Escalate this chunk to the
+                    // resumable exhaustive scan below; do not write until that verdict is in.
+                    // Once per chunk only: scans holds an entry while a resumable scan is in
+                    // progress, so later slices of the same chunk must not re-log the warning.
+                    if (logger != null && !scans.containsKey(dispatch.pos())) {
+                        logger.warning("Arena restore: chunk " + dispatch.pos()
+                                + " failed the bounded trusted-diff check (" + sampled.size()
+                                + " sampled discrepancy/ies); switching to the exhaustive scan before any write.");
+                    }
+                }
+            }
+        }
+
         if (mustVerify && !verified.contains(dispatch.pos())) {
             ChunkScan scan = scans.computeIfAbsent(dispatch.pos(),
                     pos -> new ChunkScan(snapshot, pos));

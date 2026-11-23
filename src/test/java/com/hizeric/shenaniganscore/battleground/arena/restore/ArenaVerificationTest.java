@@ -110,6 +110,36 @@ class ArenaVerificationTest {
                 Map.of(CHUNK, cells));
     }
 
+    /** All-stone 16x32x16 chunk (8192 cells) bundled with a probe that counts its calls. */
+    private static final class LargeChunk {
+        final ArenaSnapshot snapshot;
+        final CountingProbe probe;
+        LargeChunk(ArenaSnapshot snapshot) {
+            this.snapshot = snapshot;
+            this.probe = new CountingProbe(snapshot);
+        }
+    }
+
+    /** Returns each cell's baseline state while recording how often it was asked. */
+    private static final class CountingProbe implements ArenaVerification.StateProbe {
+        private final ArenaSnapshot snapshot;
+        int calls;
+        CountingProbe(ArenaSnapshot snapshot) { this.snapshot = snapshot; }
+        @Override public String stateAt(int x, int y, int z) {
+            calls++;
+            return snapshot.stateAt(x, y, z);
+        }
+    }
+
+    private static LargeChunk largeChunk() {
+        int[] cells = new int[ArenaSnapshot.cellCount(0, 60, 0, 15, 91, 15, 0, 0)];
+        Arrays.fill(cells, 1); // palette index 1 = minecraft:stone
+        ArenaSnapshot snapshot = new ArenaSnapshot("ffa", "world", 0, 60, 0, 15, 91, 15,
+                1L, cells.length, "TEST", List.of("minecraft:air", "minecraft:stone"),
+                Map.of(CHUNK, cells));
+        return new LargeChunk(snapshot);
+    }
+
     @Test
     void byChunkCoversEverySnapshotPosition() {
         Map<ChunkPos, Set<Long>> positions = ArenaVerification.byChunk(snapshot());
@@ -199,5 +229,65 @@ class ArenaVerificationTest {
         assertTrue(engine.progressPercent() > 0, "an empty ledger must not freeze progress at 0%");
         for (int i = 0; i < 100 && engine.isRestoring(); i++) engine.restoreStep(null);
         assertEquals(100, engine.progressPercent());
+    }
+
+    @Test
+    void sampledUnloggedChunkDetectsDiscrepancyAtFirstCell() {
+        ArenaSnapshot snapshot = snapshot();
+        ArenaVerification.StateProbe world = (x, y, z) ->
+                x == 0 && y == 60 && z == 0 ? "minecraft:dirt" : snapshot.stateAt(x, y, z);
+
+        assertEquals(Set.of(BlockKey.pack(0, 60, 0)), ArenaVerification.sampledUnloggedChunk(
+                snapshot, CHUNK, world, Set.of(), ArenaVerification.CHEAP_SAMPLE_CELLS));
+    }
+
+    @Test
+    void sampledUnloggedChunkIgnoresLedgerPositions() {
+        ArenaSnapshot snapshot = snapshot();
+        ArenaVerification.StateProbe world = (x, y, z) ->
+                x == 0 && y == 60 && z == 0 ? "minecraft:dirt" : snapshot.stateAt(x, y, z);
+
+        assertEquals(Set.of(), ArenaVerification.sampledUnloggedChunk(
+                snapshot, CHUNK, world, Set.of(BlockKey.pack(0, 60, 0)),
+                ArenaVerification.CHEAP_SAMPLE_CELLS));
+    }
+
+    @Test
+    void sampledUnloggedChunkTreatsNullWorldStateAsDiscrepancy() {
+        ArenaSnapshot snapshot = snapshot();
+        ArenaVerification.StateProbe world = (x, y, z) -> null;
+
+        assertTrue(ArenaVerification.sampledUnloggedChunk(snapshot, CHUNK, world, Set.of(),
+                        ArenaVerification.CHEAP_SAMPLE_CELLS).contains(BlockKey.pack(0, 60, 0)),
+                "a null world state must not throw and the first sampled cell must be reported");
+    }
+
+    @Test
+    void sampledUnloggedChunkProbesAtMostSampleCells() {
+        LargeChunk large = largeChunk();
+
+        assertEquals(Set.of(), ArenaVerification.sampledUnloggedChunk(
+                large.snapshot, CHUNK, large.probe, Set.of(), 64));
+        assertTrue(large.probe.calls <= 64, "at most sampleCells probe calls");
+        assertTrue(large.probe.calls >= 2, "a large chunk must still get several probes");
+        assertTrue(large.probe.calls < 8192 / 10, "far fewer calls than an exhaustive 8192-cell scan");
+    }
+
+    @Test
+    void sampledUnloggedChunkDoesNotReportCellsOutsideSample() {
+        ArenaSnapshot snapshot = largeChunk().snapshot;
+        ArenaVerification.StateProbe world = (x, y, z) ->
+                x == 1 && y == 60 && z == 0 ? "minecraft:dirt" : snapshot.stateAt(x, y, z);
+
+        assertEquals(Set.of(), ArenaVerification.sampledUnloggedChunk(
+                snapshot, CHUNK, world, Set.of(), 64),
+                "cell index 1 is off the stride, so the bounded detector accepts the residual risk");
+    }
+
+    @Test
+    void sampledUnloggedChunkOnEmptySnapshotReturnsEmpty() {
+        ArenaVerification.StateProbe probe = (x, y, z) -> "minecraft:stone";
+
+        assertEquals(Set.of(), ArenaVerification.sampledUnloggedChunk(null, CHUNK, probe, null, 64));
     }
 }
