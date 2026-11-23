@@ -46,6 +46,17 @@ class ExecutionerDefaultsTest {
     }
 
     @Test
+    void everyLegacyIdStillResolvesToTheCanonicalItem() {
+        assertEquals("executioner_sword", ExecutionerSwordId.OLD_ID);
+        for (String legacy : ExecutionerSwordId.LEGACY_IDS) {
+            assertEquals("minecraft:executioners_sword", ExecutionerSwordId.migrate(legacy));
+        }
+        assertEquals("minecraft:executioners_sword",
+                ExecutionerSwordId.migrate("minecraft:executioners_sword"));
+        assertEquals("jjk:blue", ExecutionerSwordId.migrate("jjk:blue"));
+    }
+
+    @Test
     void registeredDefinitionIsVisibleWithDiamondSwordIcon() {
         var definition = ExecutionerSwordAbility.definition(new ExecutionerSwordHitListener());
         assertEquals("minecraft:executioners_sword", definition.id().toString());

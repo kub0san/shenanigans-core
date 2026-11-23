@@ -1,6 +1,7 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword;
 
 import com.hizeric.shenaniganscore.core.sound.SoundUtils;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Sound;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -28,6 +29,7 @@ public final class ExecutionerSwordHitListener implements Listener {
     public static final long ARM_DURATION_MS = ExecutionerSwordItem.ARM_DURATION_MS;
 
     private final Map<UUID, Long> armedUntil = new ConcurrentHashMap<>();
+    private static final MiniMessage MM = MiniMessage.miniMessage();
 
     public ExecutionerSwordHitListener() {
     }
@@ -35,6 +37,10 @@ public final class ExecutionerSwordHitListener implements Listener {
     public void arm(Player player) {
         armedUntil.put(player.getUniqueId(), System.currentTimeMillis() + ARM_DURATION_MS);
         SoundUtils.play(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.6f, 1.2f);
+        // Arming is otherwise invisible: without this, both /ability 1 and /bg debug ability
+        // look like no-ops until the player happens to land a hit.
+        player.sendMessage(MM.deserialize(
+                "<dark_red><bold>EXECUTIONER'S SWORD ARMED <gray>- strike within 6s"));
     }
 
     public boolean isArmed(Player player) {

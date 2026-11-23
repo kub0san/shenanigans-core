@@ -16,6 +16,9 @@ class AbilityIdMigrationTest {
     void legacyAbilityIdsBecomeCanonical() {
         assertEquals("minecraft:dash_sword", AbilityIdMigration.apply("battleground:dash_sword"));
         assertEquals("minecraft:dash_sword", AbilityIdMigration.apply("minecraft:dashsword"));
+        assertEquals("minecraft:executioners_sword", AbilityIdMigration.apply("executioner_sword"));
+        assertEquals("minecraft:executioners_sword", AbilityIdMigration.apply("minecraft:executioner_sword"));
+        assertEquals("minecraft:executioners_sword", AbilityIdMigration.apply("minecraft:executionsword"));
         assertEquals("jjk:piercing_blood", AbilityIdMigration.apply("jjk:piercingblood"));
         assertEquals("jjk:world_slash", AbilityIdMigration.apply("jjk:worldslash"));
     }
@@ -32,6 +35,8 @@ class AbilityIdMigrationTest {
         assertFalse(AbilityIdMigration.isLegacy("minecraft:dash_sword"));
         assertEquals("battleground:dash_sword",
                 AbilityIdMigration.legacyOf("minecraft:dash_sword"));
+        assertEquals("minecraft:executioner_sword",
+                AbilityIdMigration.legacyOf("minecraft:executioners_sword"));
         assertNull(AbilityIdMigration.legacyOf("jjk:blue"));
     }
 

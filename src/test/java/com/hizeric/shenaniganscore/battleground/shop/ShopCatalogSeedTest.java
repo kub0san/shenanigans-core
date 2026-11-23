@@ -134,6 +134,50 @@ class ShopCatalogSeedTest {
         assertTrue(entries.contains(blue), "unrelated entries must survive the id migration");
     }
 
+    private static final String EXECUTIONER_ID = "minecraft:executioners_sword";
+
+    private static ShopEntry seededExecutioner(int price) {
+        return ShopEntry.customItem(EXECUTIONER_ID, Material.NETHERITE_SWORD, "Executioner's Sword",
+                price, EXECUTIONER_ID, Map.of("type", "NETHERITE_SWORD"));
+    }
+
+    private static ShopEntry staleExecutioner(int price) {
+        return ShopEntry.customItem("minecraft:executioner_sword", Material.NETHERITE_SWORD,
+                "Executioner's Sword", price, "minecraft:executioner_sword",
+                Map.of("type", "OLD_STAMP"));
+    }
+
+    @Test
+    void aStaleExecutionerRowIsMigratedAndRefreshedFromTheSeed() {
+        List<ShopEntry> entries = new ArrayList<>(List.of(staleExecutioner(500)));
+
+        assertTrue(ShopCatalog.migrateLegacyIds(entries, List.of(seededExecutioner(500))));
+        assertEquals(1, entries.size());
+        ShopEntry migrated = entries.get(0);
+        assertEquals(EXECUTIONER_ID, migrated.id());
+        assertEquals(EXECUTIONER_ID, migrated.abilityId());
+        assertEquals(Map.of("type", "NETHERITE_SWORD"), migrated.itemData(),
+                "the stamp must be refreshed so old rows stop resolving to an unregistered ability");
+    }
+
+    @Test
+    void aStaleExecutionerDuplicateIsDroppedWhenTheCanonicalRowExists() {
+        List<ShopEntry> entries = new ArrayList<>(List.of(
+                staleExecutioner(500), seededExecutioner(500)));
+
+        assertTrue(ShopCatalog.migrateLegacyIds(entries, List.of(seededExecutioner(500))));
+        assertEquals(1, entries.size());
+        assertEquals(EXECUTIONER_ID, entries.get(0).id());
+    }
+
+    @Test
+    void legacyExecutionerIdsResolveToTheCanonicalItemId() {
+        assertEquals(EXECUTIONER_ID, ShopCatalog.canonicalCustomItemId("minecraft:executioner_sword"));
+        assertEquals(EXECUTIONER_ID, ShopCatalog.canonicalCustomItemId("executioner_sword"));
+        assertEquals(EXECUTIONER_ID, ShopCatalog.canonicalCustomItemId("minecraft:executionsword"));
+        assertEquals(EXECUTIONER_ID, ShopCatalog.canonicalCustomItemId(EXECUTIONER_ID));
+    }
+
     private static ShopEntry newAbility() {
         return ShopEntry.ability("worldslash", Material.NETHERITE_SCRAP, "World Cutting Slash",
                 250, 6, "jjk:world_slash");

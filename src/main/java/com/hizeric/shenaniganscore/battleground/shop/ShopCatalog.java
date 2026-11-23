@@ -124,26 +124,44 @@ public final class ShopCatalog {
     }
 
     /**
-     * One-time migration of the legacy Dash Sword catalogue id ({@code dash_sword}) to the
-     * canonical {@code minecraft:dash_sword}. Retained as a pure, server-free seam for tests;
-     * a fresh SQL database has no legacy ids to migrate.
+     * One-time migration of every seeded custom item's historical catalogue id to its canonical
+     * spelling (Dash Sword and Executioner's Sword). A legacy row is rewritten from the current
+     * seed so its item data carries the new PDC stamp; when the canonical row already exists the
+     * stale duplicate is dropped instead. Retained as a pure, server-free seam for tests.
      */
     static boolean migrateLegacyIds(List<ShopEntry> entries, List<ShopEntry> seeded) {
-        ShopEntry seed = seeded.stream()
-                .filter(e -> DashSwordId.NEW_ID.equals(e.id())).findFirst().orElse(null);
         boolean changed = false;
-        for (int i = 0; i < entries.size(); i++) {
+        for (int i = entries.size() - 1; i >= 0; i--) {
             ShopEntry entry = entries.get(i);
-            String migratedId = DashSwordId.migrate(entry.id());
-            if (migratedId.equals(entry.id())) continue;
-            var itemData = seed != null ? seed.itemData() : entry.itemData();
+            if (!entry.isCustomItem()) continue;
+            String canonical = canonicalCustomItemId(entry.id());
+            if (canonical == null || canonical.equals(entry.id())) continue;
+
+            boolean canonicalAlreadyPresent = entries.stream()
+                    .anyMatch(e -> e.isCustomItem() && canonical.equals(e.id()));
+            if (canonicalAlreadyPresent) {
+                entries.remove(i);
+                changed = true;
+                continue;
+            }
+
+            ShopEntry seed = seeded.stream()
+                    .filter(e -> canonical.equals(e.id())).findFirst().orElse(null);
+            String abilityId = seed != null ? seed.abilityId()
+                    : AbilityIdMigration.apply(entry.abilityId());
             entries.set(i, new ShopEntry(
-                    DashSwordId.NEW_ID, entry.category(), entry.tags(), entry.icon(),
-                    entry.displayName(), entry.price(), entry.enabled(), entry.abilityId(),
-                    itemData, entry.streakRequired()));
+                    canonical, entry.category(), entry.tags(), entry.icon(),
+                    entry.displayName(), entry.price(), entry.enabled(), abilityId,
+                    seed != null ? seed.itemData() : entry.itemData(), entry.streakRequired()));
             changed = true;
         }
         return changed;
+    }
+
+    /** Canonical catalogue id for a possibly-legacy custom-item id; unchanged when unknown. */
+    static String canonicalCustomItemId(String id) {
+        if (id == null) return null;
+        return ExecutionerSwordId.migrate(DashSwordId.migrate(id));
     }
 
     /**
@@ -251,7 +269,7 @@ public final class ShopCatalog {
      * {@code isSimilar}, so catalogue edits cannot silently break held-item recognition.
      */
     public ShopEntry customItemFor(ItemStack stack) {
-        String itemId = BattlegroundItemKeys.idOf(stack);
+        String itemId = canonicalCustomItemId(BattlegroundItemKeys.idOf(stack));
         if (itemId == null) return null;
         return entries.stream()
                 .filter(e -> e.isCustomItem() && e.enabled() && itemId.equals(e.id()))

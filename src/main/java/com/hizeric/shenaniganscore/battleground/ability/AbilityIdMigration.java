@@ -18,6 +18,9 @@ public final class AbilityIdMigration {
     private static final Map<String, String> RENAMES = Map.of(
             "battleground:dash_sword", "minecraft:dash_sword",
             "minecraft:dashsword", "minecraft:dash_sword",
+            "executioner_sword", "minecraft:executioners_sword",
+            "minecraft:executioner_sword", "minecraft:executioners_sword",
+            "minecraft:executionsword", "minecraft:executioners_sword",
             "jjk:piercingblood", "jjk:piercing_blood",
             "jjk:worldslash", "jjk:world_slash");
 
@@ -29,6 +32,7 @@ public final class AbilityIdMigration {
         // Explicit insertion order: Map.of has no stable iteration order, so the first
         // legacy spelling for a canonical id must be chosen deterministically.
         reverse.put("minecraft:dash_sword", "battleground:dash_sword");
+        reverse.put("minecraft:executioners_sword", "minecraft:executioner_sword");
         reverse.put("jjk:piercing_blood", "jjk:piercingblood");
         reverse.put("jjk:world_slash", "jjk:worldslash");
         LEGACY = Map.copyOf(reverse);

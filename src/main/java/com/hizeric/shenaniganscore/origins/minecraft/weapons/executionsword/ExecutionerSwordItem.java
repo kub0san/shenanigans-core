@@ -95,7 +95,8 @@ public final class ExecutionerSwordItem {
     }
 
     public static boolean isExecutionerSword(ItemStack stack) {
-        return BattlegroundItemKeys.matches(stack, ID);
+        String stampedId = BattlegroundItemKeys.idOf(stack);
+        return ID.equals(stampedId) || ExecutionerSwordId.isLegacy(stampedId);
     }
 
     private static Component mini(String miniMessage) {

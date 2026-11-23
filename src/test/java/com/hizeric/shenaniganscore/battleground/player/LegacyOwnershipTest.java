@@ -23,6 +23,18 @@ class LegacyOwnershipTest {
     }
 
     @Test
+    void legacyExecutionerAbilityMapsToTheCanonicalItemId() {
+        assertEquals("minecraft:executioners_sword",
+                LegacyOwnership.toCatalogEntry("minecraft:executioner_sword"));
+        assertEquals("minecraft:executioners_sword",
+                LegacyOwnership.toCatalogEntry("executioner_sword"));
+        assertEquals("minecraft:executioners_sword",
+                LegacyOwnership.toCatalogEntry("minecraft:executionsword"));
+        assertEquals("minecraft:executioners_sword",
+                LegacyOwnership.toCatalogEntry("minecraft:executioners_sword"));
+    }
+
+    @Test
     void aBareValueIsAlreadyAnEntryId() {
         assertEquals("blue", LegacyOwnership.toCatalogEntry("blue"));
     }
