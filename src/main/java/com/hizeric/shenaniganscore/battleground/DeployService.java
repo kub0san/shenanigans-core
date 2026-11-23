@@ -84,10 +84,8 @@ final class DeployService {
                 case NO_ARENA -> player.sendMessage(MiniMessage.miniMessage().deserialize(
                         "<red>The arena has not been set up yet. Ask an admin to run /bg setup."));
                 case RESTORING -> {
-                    String msg = m.state == RoundState.STAGING
-                            ? "<yellow>The arena is preparing (tier 1). Deployment opens when ready."
-                            : "<yellow>The arena is still restoring. Try again in a moment.";
-                    player.sendMessage(MiniMessage.miniMessage().deserialize(msg));
+                    player.sendMessage(MiniMessage.miniMessage().deserialize(
+                            RoundReadiness.waitingMessage(m.state)));
                 }
                 case ALREADY_DEPLOYED -> player.sendMessage(MiniMessage.miniMessage().deserialize(
                         "<yellow>You are already deployed — finish the fight first."));

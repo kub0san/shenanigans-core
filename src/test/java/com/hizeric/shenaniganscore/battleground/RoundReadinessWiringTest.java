@@ -22,6 +22,8 @@ class RoundReadinessWiringTest {
             "shenaniganscore", "battleground", "RoundController.java");
     private static final Path MANAGER = Path.of("src", "main", "java", "com", "hizeric",
             "shenaniganscore", "battleground", "BattlegroundManager.java");
+    private static final Path DEPLOY_SERVICE = Path.of("src", "main", "java", "com", "hizeric",
+            "shenaniganscore", "battleground", "DeployService.java");
 
     private static String source(Path path) throws IOException {
         assertTrue(Files.isRegularFile(path), "expected source at " + path.toAbsolutePath());
@@ -98,5 +100,17 @@ class RoundReadinessWiringTest {
                 "the PR #2 one-shot tier-1 gate stays authoritative");
         assertTrue(source(MANAGER).contains("this.rounds::onTierOneGateOpen"),
                 "the engine must still call back into the controller's tier-1 gate");
+    }
+
+    @Test
+    void joinFeedbackDelegatesToTheReadinessGate() throws IOException {
+        String restoring = block(source(DEPLOY_SERVICE), "case RESTORING -> {",
+                "case ALREADY_DEPLOYED ->");
+        assertTrue(restoring.contains("RoundReadiness.waitingMessage(m.state)"),
+                "join feedback must come from the readiness gate's single source of copy");
+        assertFalse(restoring.contains("tier 1"),
+                "DeployService must not keep its own tier-1 join copy");
+        assertFalse(restoring.contains("still restoring"),
+                "DeployService must not keep its own restoring join copy");
     }
 }
