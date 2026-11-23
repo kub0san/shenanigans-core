@@ -446,6 +446,15 @@ class DropZoneTest {
         assertEquals(80, selection.candidate().groundY());
         assertTrue(Math.abs(selection.candidate().x()) < 8 && Math.abs(selection.candidate().z()) < 8,
                 "wall-top columns must not be the landing spot");
+        // Strengthen: no seed may select a wall-ring column while an interior candidate exists.
+        for (int seed = 1; seed <= 50; seed++) {
+            DropZone.Selection seeded = DropZone.select(probe, -8, 8, -8, 8,
+                    DropCohort.empty(), thinFloorConfig(80), new Random(seed));
+            assertTrue(seeded.found(), "interior floor exists, so something must be selected, seed " + seed);
+            assertEquals(80, seeded.candidate().groundY(), "seed " + seed);
+            assertTrue(Math.abs(seeded.candidate().x()) < 8 && Math.abs(seeded.candidate().z()) < 8,
+                    "wall-top columns must not be the landing spot, seed " + seed);
+        }
     }
 
     @Test

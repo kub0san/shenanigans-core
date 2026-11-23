@@ -153,6 +153,16 @@ public final class DropZone {
                     ? Reason.ALL_LIQUID : Reason.NO_SOLID_GROUND);
         }
 
+        // Prefer interior candidates over the wall ring: a wall column carries no lateral support
+        // on the arena edge, so while any interior candidate exists the selection must not revert
+        // to the original corner-only behavior (issue #4 follow-up: wall tops were score-equal).
+        if (candidates.stream().anyMatch(c -> !isWallColumn(c.x(), c.z(), minX, maxX, minZ, maxZ))) {
+            List<Candidate> interior = candidates.stream()
+                    .filter(c -> !isWallColumn(c.x(), c.z(), minX, maxX, minZ, maxZ))
+                    .toList();
+            if (!interior.isEmpty()) candidates = interior;
+        }
+
         for (int tierIndex = 0; tierIndex < config.tiers().size(); tierIndex++) {
             Tier tier = config.tiers().get(tierIndex);
             Candidate best = null;
@@ -238,6 +248,29 @@ public final class DropZone {
     private static boolean hasLateralSupport(DropProbe probe, int x, int z, int y) {
         return probe.isSolid(x - 1, y, z) || probe.isSolid(x + 1, y, z)
                 || probe.isSolid(x, y, z - 1) || probe.isSolid(x, y, z + 1);
+    }
+
+    /** True for columns on the outer ring of the sampled rectangle — they have no lateral support. */
+    private static boolean isWallColumn(int x, int z, int minX, int maxX, int minZ, int maxZ) {
+        return x == minX || x == maxX || z == minZ || z == maxZ;
+    }
+
+    /** True when the lowest solid surface plane in the coarse sample sits strictly above the declared {@code regionMinY}: the region bounds are misconfigured below the real floor. Deploy selection cannot land thin floors there (they fail the {@code y == regionMinY} gate), so the capture-time advisory warns instead of pretending a thin floor is present. */
+    public static boolean hasMisconfiguredFloorY(DropProbe probe, int minX, int maxX, int minZ,
+                                                 int maxZ, int regionMinY, int regionMaxY,
+                                                 int step) {
+        step = Math.max(1, step);
+        for (int x = minX; x <= maxX; x += step) {
+            for (int z = minZ; z <= maxZ; z += step) {
+                for (int y = regionMinY; y <= regionMaxY; y++) {
+                    if (probe.isSolid(x, y, z)) {
+                        if (y > regionMinY) return true;
+                        break;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /** True when any coarse-sampled column of the arena has a single-layer floor. */
