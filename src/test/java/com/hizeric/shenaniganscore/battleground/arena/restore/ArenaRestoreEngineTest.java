@@ -167,6 +167,18 @@ class ArenaRestoreEngineTest {
         return engine(fx, policy, probe, logger, null);
     }
 
+    /** Engine with a caller-supplied clock, for forcing a resumable scan across several slices. */
+    private static ArenaRestoreEngine engineWithClock(Fixture fx, Policy policy,
+                                                      ArenaRestoreEngine.StateProbe probe,
+                                                      Logger logger,
+                                                      java.util.function.LongSupplier clock) {
+        Deps deps = new Deps(OK_LOADER, SYNC,
+                (world, packed, state, physics) -> fx.writes.add(packed),
+                probe, () -> policy,
+                new TicketLedger<>(key -> { }, key -> { }), WORLD);
+        return new ArenaRestoreEngine(deps, logger, null, clock);
+    }
+
     private static ArenaRestoreEngine engine(Fixture fx, Policy policy,
                                              ArenaRestoreEngine.MainRunner runner,
                                              ArenaRestoreEngine.ChunkLoader loader,
@@ -1162,5 +1174,69 @@ class ArenaRestoreEngineTest {
         assertEquals(snapshot.chunkPositions().size(), engine.untrustedChunks());
         assertEquals(2 * ArenaVerification.positionsOf(snapshot, new ChunkPos(0, 0)).size(),
                 fx.writes.stream().distinct().count(), "both stale chunks are fully restored");
+    }
+
+    /**
+     * A dirty bounded sample starts a resumable exhaustive scan. A later slice sees a clean sample
+     * (the transient unload cleared) but must NOT mark the chunk verified and discard that scan.
+     */
+    @Test
+    void dirtySampleKeepsTheExhaustiveScanAcrossSlices() {
+        Fixture fx = new Fixture();
+        int[] probeCalls = {0};
+        boolean[] dirtyOnce = {true};
+        List<LogRecord> warnings = new ArrayList<>();
+        Logger logger = Logger.getLogger("multiSlice-" + System.nanoTime());
+        logger.setUseParentHandlers(false);
+        Handler handler = new Handler() {
+            @Override public void publish(LogRecord record) { warnings.add(record); }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        logger.addHandler(handler);
+
+        // 768 cells, so MIN_SCAN_BLOCKS=512 cannot finish the exhaustive scan in one slice.
+        ArenaSnapshot snapshot = stoneChunks(60, 62, 15, 15);
+        // Stride is 768/64 = 12; cell index 12 is (12,60,0), the first off-zero sample.
+        ArenaRestoreEngine.StateProbe probe = (world, x, y, z) -> {
+            probeCalls[0]++;
+            return dirtyOnce[0] && x == 12 && y == 60 && z == 0
+                    ? "minecraft:dirt" : "minecraft:stone";
+        };
+        Policy policy = new Policy(1, 256, 4, 8, false, true, true);
+        // First step: three free clock reads (beginTick, canStartChunk, canStartSections), then the
+        // scan yields after its 512 guaranteed cells. Later steps: clock stays free so writes finish.
+        int[] freeReads = {3};
+        int[] calls = {0};
+        java.util.function.LongSupplier clock = () ->
+                ++calls[0] <= freeReads[0] ? 0L : 1_000_000L;
+        ArenaRestoreEngine engine = engineWithClock(fx, policy, probe, logger, clock);
+
+        try {
+            assertTrue(engine.beginRestore(region(), "ffa",
+                    diff(set(BlockKey.pack(1, 60, 1))), snapshot));
+            boolean first = true;
+            for (int i = 0; i < 200 && engine.isRestoring(); i++) {
+                dirtyOnce[0] = first;
+                freeReads[0] = first ? 3 : Integer.MAX_VALUE;
+                first = false;
+                calls[0] = 0;
+                engine.restoreStep(null);
+            }
+        } finally {
+            logger.removeHandler(handler);
+        }
+
+        assertFalse(engine.isRestoring());
+        assertFalse(engine.restoreFailed());
+        assertEquals(1, engine.untrustedChunks(),
+                "an observed discrepancy must remain untrusted until the full comparison finishes");
+        assertTrue(probeCalls[0] >= 768,
+                "the exhaustive scan must finish: got " + probeCalls[0] + " probes");
+        long boundedWarnings = warnings.stream()
+                .filter(r -> r.getMessage() != null
+                        && r.getMessage().toString().contains("bounded trusted-diff check"))
+                .count();
+        assertEquals(1, boundedWarnings, "one warning per chunk across all resumable slices");
     }
 }

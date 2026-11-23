@@ -463,7 +463,10 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         boolean escalateToSnapshot = false;
         // An unflushed ledger is untrustworthy even when the verify toggle is off.
         boolean mustVerify = policy.verify() || (diff != null && !diff.complete());
-        if (mustVerify && !verified.contains(dispatch.pos())) {
+        // Once a resumable exhaustive scan owns this chunk, its dirty sample must never be
+        // re-evaluated: a transient clean re-sample could mark the chunk verified and discard
+        // the full comparison (and its untrusted/snapshot fallback verdict) mid-flight.
+        if (mustVerify && !verified.contains(dispatch.pos()) && !scans.containsKey(dispatch.pos())) {
             if (diff != null && diff.complete() && diff.positions().isEmpty()) {
                 // A committed, empty ledger is authoritative: nothing to compare, so no probes.
                 scans.remove(dispatch.pos());
