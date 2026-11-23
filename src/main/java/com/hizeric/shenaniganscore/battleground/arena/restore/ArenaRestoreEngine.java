@@ -106,6 +106,11 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     private Phase phase = Phase.IDLE;
     private boolean restoring;
     private int pendingLoads;
+    /**
+     * In-flight dispatches whose job is no longer represented in the queue (final slices re-queue
+     * nothing, so {@link #pendingLoads} double-counts them for the work-share progress ratio).
+     */
+    private int finalSliceInFlight;
     private long writtenChunks;
     private long totalPositions = 1L;
     /** Rolling per-tick budget shared by every callback that executes inside the same window. */
@@ -228,6 +233,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         queue.trackLedger(diff.positions());
         callbackBudget = null;
         this.pendingLoads = 0;
+        this.finalSliceInFlight = 0;
         this.writtenChunks = 0L;
         this.stepCounter = 0;
         this.totalPositions = Math.max(1L, diff.positions().size());
@@ -295,6 +301,9 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
 
             Dispatch dispatch = queue.next(policy.blocksPerTick());
             if (dispatch == null) continue; // gated this tick
+            // A final slice removes its job from the queue (nextFrom does not re-queue), so the
+            // work-share progress denominator must count it as the in-flight unit it is.
+            if (dispatch.finalSlice()) finalSliceInFlight++;
 
             String ticketKey = ticketKey(world, dispatch.pos());
             deps.tickets().acquire(ticketKey);
@@ -328,6 +337,9 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                                 // Only the owning generation decrements its own in-flight count.
                                 if (dispatchedGeneration == generation) {
                                     pendingLoads = Math.max(0, pendingLoads - 1);
+                                    if (current.finalSlice()) {
+                                        finalSliceInFlight = Math.max(0, finalSliceInFlight - 1);
+                                    }
                                     // A tier-2 boundary cancel may leave no stepper to drain the
                                     // queue. The last owning callback must finish that restore;
                                     // the guards keep stale/full-cancel callbacks from refiring
@@ -393,7 +405,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     public int progressPercent() {
         if (phase == Phase.DONE && !queue.failed()) return 100;
         Set<Long> ledger = diff == null ? Set.of() : diff.positions();
-        if (ledger.isEmpty()) return queue.progressPercentByWork(pendingLoads);
+        if (ledger.isEmpty()) return queue.progressPercentByWork(finalSliceInFlight);
         return queue.progressPercent(totalPositions, ledger);
     }
 

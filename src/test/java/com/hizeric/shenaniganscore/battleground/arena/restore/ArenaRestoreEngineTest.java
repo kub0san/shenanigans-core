@@ -285,6 +285,33 @@ class ArenaRestoreEngineTest {
         assertEquals(100, engine.progressPercent());
     }
 
+
+    /**
+     * Progress must not regress while non-final tier-2 slices are in flight (#3 cross-issue
+     * follow-up): a dispatched job is re-queued after its first slice, so the work-share ratio's
+     * in-flight term may only count the final slice. Old behavior: 0 -> 50 -> 33 -> ... backwards.
+     */
+    @Test
+    void progressNeverGoesBackwardsDuringEscalatedSlices() {
+        Fixture fx = new Fixture();
+        ArenaRestoreEngine.StateProbe unlogged = (world, x, y, z) -> "minecraft:dirt";
+        ArenaRestoreEngine engine = engine(fx, new Policy(100_000, 1, 4, 8, false, false, true),
+                task -> fx.tasks.add(task), OK_LOADER, unlogged);
+
+        assertTrue(engine.beginRestore(region(), "ffa", unflushedEmptyDiff(), stoneChunks(15, 15)));
+        int last = 0;
+        for (int i = 0; i < 20000 && engine.isRestoring(); i++) {
+            engine.restoreStep(null);
+            int mid = engine.progressPercent();
+            assertTrue(mid >= last, "progress must not go backwards mid-step: " + last + " -> " + mid);
+            while (!fx.tasks.isEmpty()) fx.tasks.poll().run();
+            int after = engine.progressPercent();
+            assertTrue(after >= mid, "progress must not go backwards after slice: " + mid + " -> " + after);
+            last = after;
+        }
+        assertFalse(engine.isRestoring());
+        assertEquals(100, engine.progressPercent());
+    }
     /** Decision test: a stationary player standing on a cell must not defer it. */
     @Test
     void stationaryPlayerOnCellStillGetsWritten() {
