@@ -195,7 +195,8 @@ class DropZoneTest {
                 List.of(new DropCohort.Anchor(0, 0, 1.0)),
                 List.of(new DropZone.Point(12, 0)));
 
-        DropZone.Selection selection = select(probe, -20, 20, cohort);
+        DropZone.Selection selection = DropZone.select(
+                probe, -20, 20, -20, 20, cohort, config(), new java.util.Random(1));
 
         assertTrue(selection.found());
         double toAnchor = Math.hypot(selection.candidate().x(), selection.candidate().z());
