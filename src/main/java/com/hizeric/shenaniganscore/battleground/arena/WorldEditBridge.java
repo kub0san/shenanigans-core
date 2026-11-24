@@ -53,6 +53,11 @@ public final class WorldEditBridge {
 
     public static void setEnabled(boolean value) { enabled = value; }
 
+    /** Drops the cached schematic format so a provider reload cannot leave a stale reference. */
+    public static void clearCachedFormat() {
+        cachedFormat = null;
+    }
+
     private static boolean disabled() { return !enabled; }
 
     public static Region selection(Player player) {

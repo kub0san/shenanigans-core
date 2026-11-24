@@ -2,6 +2,7 @@ package com.hizeric.shenaniganscore;
 
 import com.hizeric.shenaniganscore.battleground.BattlegroundListener;
 import com.hizeric.shenaniganscore.battleground.BattlegroundManager;
+import com.hizeric.shenaniganscore.battleground.RoundState;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaProtection;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaEntryGuard;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRuntimeConfig;
@@ -56,6 +57,7 @@ import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.Mannequin
 import com.hizeric.shenaniganscore.resourcepack.ResourcePackManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.Bukkit;
+import org.bukkit.event.HandlerList;
 import org.bukkit.permissions.Permission;
 import org.bukkit.permissions.PermissionDefault;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -63,12 +65,24 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
 public final class ShenanigansCore extends JavaPlugin {
 
     private static volatile ShenanigansCore instance;
+
+    /** Replay guard: PlugManX can call enable/disable more than once on the same instance. */
+    private final AtomicBoolean enabled = new AtomicBoolean();
+    /**
+     * Paper keeps a plugin's COMMANDS lifecycle handler for the lifetime of the plugin instance.
+     * Registering a second handler on a same-instance re-enable would register /bg and /ability
+     * twice when PlugManX replays the lifecycle, so this flag is deliberately never cleared on
+     * disable. A fresh instance (fresh classloader) starts with it false and registers normally.
+     */
+    private boolean commandsRegistered;
+
     private SessionManager sessionManager;
     private CooldownManager cooldownManager;
     private AbilityRegistry abilityRegistry;
@@ -135,11 +149,22 @@ public final class ShenanigansCore extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        // A PlugManX reload may replay enable on an instance that is already running. Refuse the
+        // duplicate so listeners, the HTTP server, scheduled tasks and the command handler are not
+        // installed twice; every install below is also safe to re-run after a clean disable.
+        if (!enabled.compareAndSet(false, true)) {
+            getLogger().warning("onEnable() called while already enabled; ignoring duplicate enable.");
+            return;
+        }
         instance = this;
+        // Optional-provider caches are per-enable: a same-classloader re-enable must not inherit
+        // the previous enable's class-visibility probe or its cached schematic format.
+        WorldEditSupport.reset();
         // WorldEdit is optional — the bridge class references the WorldEdit API, so it
         // must never be loaded when the provider is absent (the plugin must still boot).
         if (WorldEditSupport.isAvailable()) {
             WorldEditBridge.setEnabled(true);
+            WorldEditBridge.clearCachedFormat();
         }
         registerPermissions();
 
@@ -312,6 +337,9 @@ public final class ShenanigansCore extends JavaPlugin {
     }
 
     private void registerCommands() {
+        // The lifecycle handler survives a same-instance disable/enable, and PlugManX replays the
+        // COMMANDS lifecycle on load. Without this guard the roots would be registered twice.
+        if (commandsRegistered) return;
         // One declarative tree per root; the same tree drives Brigadier, help and startup validation.
         List<CommandNode> roots = List.of(
                 new BattlegroundCommand(this).root(),
@@ -323,6 +351,7 @@ public final class ShenanigansCore extends JavaPlugin {
         }
 
         CommandRegistrar registrar = new CommandRegistrar();
+        commandsRegistered = true;
         this.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             for (CommandNode root : roots) {
                 event.registrar().register(registrar.build(root), root.description(), root.aliases());
@@ -332,6 +361,20 @@ public final class ShenanigansCore extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // PlugManX can invoke disable twice in one reload cycle. Every step below is idempotent,
+        // but a second pass would still repeat logs and teardown, so replay is a no-op.
+        if (!enabled.compareAndSet(true, false)) return;
+        // A reload mid-fight must never be silent: the graceful steps below close live state, but
+        // admins still need to know that a restart is the supported path for an active domain/round.
+        if ((sessionManager != null && sessionManager.hasActiveSessions())
+                || (battlegroundManager != null && battlegroundManager.state() != RoundState.IDLE)) {
+            getLogger().warning("Disabling with a live domain or round; active state is being closed "
+                    + "before teardown. A full server restart is still safer than a mid-fight reload.");
+        }
+        // Defensive backstop for same-classloader reloads: Bukkit normally unregisters listeners in
+        // disablePlugin(), but doing it here makes the seam symmetric and guarantees no handler
+        // from this instance can observe a half-torn-down plugin.
+        runSafely("listeners", () -> HandlerList.unregisterAll(this));
         // Graceful order: domains release their own blocks/overlays first, then shared
         // visual systems, then a hard flag/task sweep for PlugManX-style reloads. Each
         // step is isolated so one failure cannot strand the rest of the teardown.

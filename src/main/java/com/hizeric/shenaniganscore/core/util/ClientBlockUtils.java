@@ -235,6 +235,10 @@ public final class ClientBlockUtils {
         PENDING.clear();
         ROUND_ROBIN.clear();
         OVERLAYS.clear();
+        // Issue #85: never leave the transport bound to the previous enable's PacketEvents API
+        // instance. A re-enable installs a fresh transport after requireReady(); until then the
+        // default Paper transport is a safe fallback instead of a stale singleton reference.
+        transport = new PaperTransport();
     }
 
     private static void enqueue(Player player, BlockKey key, BlockData data) {

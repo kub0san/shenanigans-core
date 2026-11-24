@@ -67,4 +67,13 @@ public final class WorldEditSupport {
         apiVisible = visible;
         return visible;
     }
+
+    /**
+     * Drops the cached visibility probe. Called at every enable so a PlugManX reload that reuses
+     * the classloader re-checks whether the optional provider is still reachable instead of
+     * trusting a result from the previous lifecycle.
+     */
+    public static void reset() {
+        apiVisible = null;
+    }
 }
