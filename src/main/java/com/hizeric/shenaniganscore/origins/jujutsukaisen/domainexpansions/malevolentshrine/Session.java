@@ -176,8 +176,22 @@ public class Session extends DomainSession {
          * landing exactly back on that base once the shake has expired. Pitch
          * is clamped to the legal ±89° range.
          */
+        /**
+         * Combines an already-registered shake with a new one without losing the
+         * original base. The newest registration drives amplitude, start and
+         * duration; an already-expired active shake contributes nothing, so the
+         * incoming base wins in that case.
+         */
+        static Shake layer(Shake active, Shake incoming) {
+            if (active == null) return incoming;
+            long elapsedSinceActiveStart = incoming.startMs - active.startMs;
+            if (elapsedSinceActiveStart >= active.durationMs) return incoming;
+            return new Shake(active.baseYaw, active.basePitch, incoming.amplitude,
+                    incoming.startMs, incoming.durationMs);
+        }
+
         Rotation rotationAt(long now) {
-            long elapsed = now - startMs;
+            long elapsed = Math.max(0L, now - startMs);
             if (elapsed >= durationMs) {
                 return new Rotation(baseYaw, basePitch);
             }
@@ -568,8 +582,7 @@ public class Session extends DomainSession {
             Location feet = p.getLocation();
 
             // Decaying sinusoidal wobble around the pre-shake rotation (no drift, no snap)
-            shakes.put(p.getUniqueId(),
-                    new Shake(feet.getYaw(), feet.getPitch(), amplitude * scale, durationMs));
+            registerShake(p, new Shake(feet.getYaw(), feet.getPitch(), amplitude * scale, durationMs));
 
             if (p.isOnGround() && p.getVehicle() == null) {
                 p.setVelocity(p.getVelocity().add(new Vector(0, 0.055 * scale, 0)));
@@ -584,14 +597,19 @@ public class Session extends DomainSession {
         }
     }
 
+    /** Registers a shake without dropping the base of one that is still active. */
+    private void registerShake(Player player, Shake incoming) {
+        shakes.compute(player.getUniqueId(), (ignored, active) -> Shake.layer(active, incoming));
+    }
+
     /**
      * Registers a session-owned rotation jitter for one player. Their current
      * facing becomes the shake's base, so the per-tick driver restores it
      * exactly at expiry — and {@link #close()} restores it if the domain ends
      * mid-shake.
      */
-    public void jitter(Player player, double amplitude, long durationMs) {
-        shakes.put(player.getUniqueId(), new Shake(player.getLocation().getYaw(),
+    void jitter(Player player, double amplitude, long durationMs) {
+        registerShake(player, new Shake(player.getLocation().getYaw(),
                 player.getLocation().getPitch(), amplitude, System.currentTimeMillis(), durationMs));
     }
 
