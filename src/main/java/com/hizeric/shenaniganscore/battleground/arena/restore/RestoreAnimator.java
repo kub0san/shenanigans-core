@@ -1,5 +1,6 @@
 package com.hizeric.shenaniganscore.battleground.arena.restore;
 
+import com.hizeric.shenaniganscore.battleground.RoundReadiness;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRegion;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRuntimeConfig;
 import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot.ChunkPos;
@@ -31,9 +32,10 @@ import java.util.function.Supplier;
  *   <li><b>Chunk outline</b>: a thin shimmer traces the restored chunk's border so the repair reads
  *       as a wave moving across the map.</li>
  *   <li><b>Chime</b>: pitch climbs with overall progress, so the restore "plays a scale".</li>
- *   <li><b>Boss bar</b>: {@code Restoring arena 63%} with a segmented bar, then a green
- *       "Deployment ready" state. The action bar is opt-in — it is a single slot shared with the
- *       technique HUD.</li>
+ *   <li><b>Boss bar</b>: {@code Restoring arena 63%} with a segmented bar. Tier 1 shows the
+ *       authoritative "verifying" status (issue #40); readiness text is owned by
+ *       {@link RoundReadiness} and is never claimed before the full restore completes. The action
+ *       bar is opt-in — it is a single slot shared with the technique HUD.</li>
  * </ul>
  *
  * <p>Cost control: nothing runs unless a player is within view distance of the chunk; particles
@@ -176,12 +178,14 @@ public final class RestoreAnimator implements RestoreEffects {
             }
         }
         if (settings.bossBar() && bossBar != null) {
-            bossBar.setTitle("Deployment ready");
-            bossBar.setColor(BarColor.GREEN);
+            // Issue #40: tier 1 is not the deploy-open boundary. Claiming "ready" here was false —
+            // RoundReadiness owns that copy and only opens the gate at full restore completion.
+            bossBar.setTitle(RoundReadiness.TIER_ONE_STATUS);
+            bossBar.setColor(BarColor.YELLOW);
         }
         if (settings.actionBar()) {
-            Component ready = Component.text("Deployment ready", NamedTextColor.GREEN);
-            for (Player player : arenaPlayers(world)) player.sendActionBar(ready);
+            Component verifying = Component.text(RoundReadiness.TIER_ONE_STATUS, NamedTextColor.YELLOW);
+            for (Player player : arenaPlayers(world)) player.sendActionBar(verifying);
         }
     }
 

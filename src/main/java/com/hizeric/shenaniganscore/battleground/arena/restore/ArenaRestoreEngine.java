@@ -113,8 +113,13 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     private int finalSliceInFlight;
     private long writtenChunks;
     private long totalPositions = 1L;
-    /** Rolling per-tick budget shared by every callback that executes inside the same window. */
+    /**
+     * One shared allowance for all stale load callbacks executing in the same wall-clock window.
+     * Without this, a burst of callbacks would each get a fresh full budget and multiply the
+     * configured per-tick caps by the number of in-flight loads (independent review H1).
+     */
     private WorkBudget callbackBudget;
+    private long callbackBudgetTick = -1L;
 
     public ArenaRestoreEngine(Plugin plugin, Logger logger, Runnable onTierOneComplete) {
         this(plugin, logger, onTierOneComplete, null);
@@ -231,7 +236,8 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         this.snapshot = snapshot;
         queue.reset();
         queue.trackLedger(diff.positions());
-        callbackBudget = null;
+        this.callbackBudget = null;
+        this.callbackBudgetTick = -1L;
         this.pendingLoads = 0;
         this.finalSliceInFlight = 0;
         this.writtenChunks = 0L;
@@ -291,8 +297,9 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         WorkBudget budget = new WorkBudget(policy.msPerTick(), policy.blocksPerTick(),
                 policy.chunksPerTick(), policy.sectionsPerTick(), nanoClock);
         budget.beginTick();
-        // One budget for the whole tick: dispatch, verification and writes all draw from it.
-        callbackBudget = budget;
+        // One budget for this tick's dispatch, verification and writes. It is captured by every
+        // callback below: a load callback runs on a later tick, and must never draw from whatever
+        // budget a *newer* restoreStep happens to own at that moment (issue #17).
 
         int guard = queue.jobCount();
         while (!queue.jobsEmpty() && pendingLoads < MAX_IN_FLIGHT && guard-- > 0) {
@@ -310,6 +317,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
             pendingLoads++;
             final Dispatch current = dispatch;
             final long dispatchedGeneration = generation;
+            final WorkBudget dispatchBudget = budget;
             try {
                 deps.loader().load(world, dispatch.pos().x(), dispatch.pos().z())
                         .whenComplete((chunk, error) -> deps.runner().run(() -> {
@@ -327,7 +335,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
                                 } else if (queue.tierTwoCancelled() && !current.tierOne()) {
                                     // round boundary ended tier 2 while this chunk was loading.
                                 } else {
-                                    processChunk(world, chunk, current, policy);
+                                    processChunk(world, chunk, current, policy, dispatchBudget);
                                 }
                             } catch (RuntimeException exception) {
                                 fail("chunk " + current.pos() + " restore failed: "
@@ -450,27 +458,33 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
     }
 
     /**
-     * The per-tick budget installed by {@link #restoreStep}. Every callback in one tick draws from
-     * this single allowance; it is never recreated mid-tick just because it ran out, otherwise the
-     * ms/block caps could be bypassed by merely triggering another callback.
+     * Budget for a load callback: its own dispatch's budget while that tick is still live, otherwise
+     * ONE shared allowance per wall-clock window. The dispatch budget prevents a stale callback from
+     * re-queuing forever against a newer tick's exhausted budget (issue #17); the shared fallback
+     * keeps the per-tick ms/block caps from being multiplied by concurrent callback bursts (H1).
      */
-    private WorkBudget sharedBudget(Policy policy) {
-        if (callbackBudget == null) {
+    private WorkBudget budgetForCallback(WorkBudget dispatchBudget, Policy policy) {
+        if (dispatchBudget != null && dispatchBudget.canContinue()) return dispatchBudget;
+        long windowNanos = Math.max(1, policy.msPerTick()) * 1_000_000L;
+        long tick = nanoClock.getAsLong() / windowNanos;
+        if (callbackBudgetTick != tick || callbackBudget == null) {
             callbackBudget = new WorkBudget(policy.msPerTick(), policy.blocksPerTick(),
                     policy.chunksPerTick(), policy.sectionsPerTick(), nanoClock);
             callbackBudget.beginTick();
+            callbackBudgetTick = tick;
         }
         return callbackBudget;
     }
 
-    private void processChunk(World world, Chunk loaded, Dispatch dispatch, Policy policy) {
+    private void processChunk(World world, Chunk loaded, Dispatch dispatch, Policy policy,
+                              WorkBudget dispatchBudget) {
         if (queue.failed() || queue.cancelled()) return;
         if (queue.tierTwoCancelled() && !dispatch.tierOne()) return;
         if (loaded == null) {
             fail("chunk " + dispatch.pos() + " was not loaded in the restore callback");
             return;
         }
-        WorkBudget work = sharedBudget(policy);
+        WorkBudget work = budgetForCallback(dispatchBudget, policy);
 
         boolean escalateToSnapshot = false;
         // An unflushed ledger is untrustworthy even when the verify toggle is off.

@@ -468,7 +468,6 @@ final class RoundController {
         // writes and their 20 Hz stepper so an IDLE deploy cannot start a round underneath them.
         if (m.restoreEngine != null) m.restoreEngine.cancelTierTwo();
         stopRestoreTask();
-        m.state = RoundState.IDLE;
         for (UUID uuid : new ArrayList<>(m.deployed)) {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null) m.deploys.leave(player);
@@ -490,6 +489,11 @@ final class RoundController {
         m.combat.clearAll();
         m.clock.reset();
         m.announce("<yellow>Round stopped by an admin.");
+        // Issue #38: STOP is a round boundary, not a way to park a dirty arena in IDLE. Going
+        // through the reset consumes the committed diff and clears protection overrides; a later
+        // START can no longer truncate an unrestored ledger. START during the restore is gated by
+        // AdminRoundGate's isRestoring check, and completion opens a fresh round as usual.
+        beginReset();
     }
 
     private Collection<UUID> stagedUuids() {

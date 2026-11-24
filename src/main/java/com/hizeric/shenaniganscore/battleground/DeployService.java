@@ -73,8 +73,8 @@ final class DeployService {
         ArenaRegion region = m.arenaStore.region();
         RoundGates.Deploy decision = RoundGates.deploy(m.state,
                 region != null && region.isCaptured(), m.isDeployed(player.getUniqueId()));
-        // forceStop() leaves IDLE while a tier-2 restore may still be writing blocks. The pure
-        // gate only sees RoundState, so block a deploy here whenever the engine is still active.
+        // A forced STOP now runs the reset/restore boundary, so tier-2 writes may still be in
+        // flight. The pure gate only sees RoundState — block deploy whenever the engine is active.
         if (decision == RoundGates.Deploy.READY && m.state == RoundState.IDLE
                 && m.restoreEngine != null && m.restoreEngine.isRestoring()) {
             decision = RoundGates.Deploy.RESTORING;

@@ -1297,4 +1297,35 @@ class ArenaRestoreEngineTest {
         assertEquals(all, Set.copyOf(fx.writes));
         assertEquals(all.size(), fx.writes.size(), "every position written exactly once");
     }
+
+    /**
+     * Issue #17: a chunk-load callback runs on a later main-thread tick than its dispatch. The old
+     * shared {@code callbackBudget} meant a delayed callback read whatever budget the *current*
+     * tick happened to own — often already exhausted — so it re-queued its whole slice and the
+     * restore stalled. The owning budget must travel with the dispatch.
+     */
+    @Test
+    void delayedCallbackWritesWithItsOwnBudgetInsteadOfRequeueingForever() {
+        Fixture fx = new Fixture();
+        java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong(0L);
+        Deque<Runnable> callbacks = new ArrayDeque<>();
+        Policy policy = new Policy(1, 100, 4, 8, false, false, false);
+        Deps deps = new Deps(OK_LOADER, callbacks::addLast,
+                (world, packed, state, physics) -> fx.writes.add(packed),
+                STONE, () -> policy,
+                new TicketLedger<>(key -> { }, key -> { }), WORLD);
+        ArenaRestoreEngine engine = new ArenaRestoreEngine(deps, LOG, null, clock::get);
+
+        Set<Long> positions = set(BlockKey.pack(1, 60, 1), BlockKey.pack(2, 60, 1));
+        assertTrue(engine.beginRestore(region(), "ffa", diff(positions), stoneChunks(15, 15)));
+        assertFalse(engine.restoreStep(null), "the step is incomplete until the load callback lands");
+        assertFalse(callbacks.isEmpty(), "the step must have dispatched a chunk-load callback");
+
+        // The callback executes after the dispatching tick's millisecond budget has expired.
+        clock.set(10_000_000L);
+        callbacks.pollFirst().run();
+
+        assertFalse(fx.writes.isEmpty(),
+                "the delayed callback must write with a fresh budget instead of re-queuing its slice");
+    }
 }

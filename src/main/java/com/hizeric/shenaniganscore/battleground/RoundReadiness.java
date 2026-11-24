@@ -8,6 +8,9 @@ package com.hizeric.shenaniganscore.battleground;
  */
 public final class RoundReadiness {
 
+    /** Plain-text tier-1 status shared with the restore boss bar / action bar (issue #40). */
+    public static final String TIER_ONE_STATUS = "Critical blocks restored — verifying the arena…";
+
     public enum Outcome {
         NONE,
         ANNOUNCE_PENDING,
@@ -69,7 +72,7 @@ public final class RoundReadiness {
 
     /** Tier-1 status: critical blocks are back, but no message says ready before completion. */
     public static String statusAnnouncement() {
-        return "<gray>Critical blocks restored — verifying the arena. Deployment opens when the restore finishes.";
+        return "<gray>" + TIER_ONE_STATUS + " Deployment opens when the restore finishes.";
     }
 
     /** Join-attempt feedback while the gate is closed; names the phase the player is waiting on. */
