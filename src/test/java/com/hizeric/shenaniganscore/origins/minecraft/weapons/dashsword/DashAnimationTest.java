@@ -76,12 +76,33 @@ class DashAnimationTest {
     }
 
     @Test
-    void soundsFireAtZeroTenAndTwenty() {
+    void soundsFireAtZeroOneAndTenAndNeverInTheClampedTail() {
         List<Integer> ticks = DashAnimation.launch().stream()
                 .filter(frame -> !frame.sounds().isEmpty())
                 .map(DashAnimation.Frame::tick)
                 .toList();
-        assertEquals(List.of(0, 10, 20), ticks);
+        assertEquals(List.of(0, 1, 10), ticks);
+
+        for (int tick = 21; tick <= DashAnimation.TRAIL_TICKS; tick++) {
+            assertTrue(DashAnimation.soundsForTick(tick).isEmpty(),
+                    "clamped tail tick " + tick + " must not replay a sound");
+        }
+    }
+
+    @Test
+    void trailDistanceNeverExceedsFormulaOrRealizedTravel() {
+        assertEquals(6.0, DashAnimation.trailDistance(3, 2.0, 100.0), 1.0e-9);
+        assertEquals(1.5, DashAnimation.trailDistance(2, 2.0, 1.5), 1.0e-9);
+        assertEquals(0.0, DashAnimation.trailDistance(1, 2.0, -4.0), 1.0e-9);
+    }
+
+    @Test
+    void blockedGroundStartRequiresDownwardForwardAndNoAirborneHistory() {
+        assertTrue(DashAnimation.blockedGroundStart(-0.4, true, false));
+        assertFalse(DashAnimation.blockedGroundStart(0.0, true, false));
+        assertFalse(DashAnimation.blockedGroundStart(0.4, true, false));
+        assertFalse(DashAnimation.blockedGroundStart(-0.4, true, true));
+        assertFalse(DashAnimation.blockedGroundStart(-0.4, false, false));
     }
 
     @Test

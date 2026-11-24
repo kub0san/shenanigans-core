@@ -55,8 +55,8 @@ public final class DashAnimation {
 
     private static final List<Sound> SOUNDS = List.of(
             new Sound(0, SoundCue.SWING, 0.9f, 1.15f),
-            new Sound(10, SoundCue.RIFT_BREATH, 0.5f, 1.45f),
-            new Sound(20, SoundCue.RIFT_CLOSE, 0.75f, 1.2f));
+            new Sound(1, SoundCue.RIFT_CLOSE, 0.75f, 1.2f),
+            new Sound(10, SoundCue.RIFT_BREATH, 0.5f, 1.45f));
 
     private DashAnimation() { }
 
@@ -74,6 +74,22 @@ public final class DashAnimation {
     /** Pure-data shrink curve retained for data/tests; echoes themselves stay full size. */
     public static float ghostScale(int age) {
         return (float) Math.max(0.05, 1.0 - age / (double) GHOST_LIFE);
+    }
+
+    /** Formulaic placement clamped to the distance the dash actually realized. */
+    public static double trailDistance(int tick, double speedPerTick, double actualTravel) {
+        return Math.min(speedPerTick * tick, Math.max(0.0, actualTravel));
+    }
+
+    /** A downward dash started on the ground and never airborne cannot move; abort it. */
+    public static boolean blockedGroundStart(double forwardY, boolean onGround, boolean airborneOnce) {
+        return forwardY < 0.0 && onGround && !airborneOnce;
+    }
+
+    /** Only launch frames carry sound; the clamped trailing frames replay none. */
+    public static List<Sound> soundsForTick(int tick) {
+        if (tick < 0 || tick >= launch().size()) return List.of();
+        return launch().get(tick).sounds();
     }
 
     /** Launch timeline: cleave, rift ribbon, wind-charge rings and sounds (ticks 0–20). */
