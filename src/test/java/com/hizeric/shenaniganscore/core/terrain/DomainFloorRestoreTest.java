@@ -2,6 +2,11 @@ package com.hizeric.shenaniganscore.core.terrain;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,5 +63,21 @@ class DomainFloorRestoreTest {
         // callback will touch the plan arrays.
         assertFalse(DomainFloor.readyToFinish(100, 100, 1),
                 "any pending async load blocks finishing, regardless of the restored count");
+    }
+
+    /** Issue #35: the emergency shutdown restore must persist unrestored columns before clearing the plan. */
+    @Test
+    void restoreNowPersistsPendingBlocksBeforeClearingThePlan() throws IOException {
+        Path source = Path.of("src", "main", "java", "com", "hizeric", "shenaniganscore",
+                "core", "terrain", "DomainFloor.java");
+        assertTrue(Files.isRegularFile(source), "expected source at " + source.toAbsolutePath());
+        String text = Files.readString(source, StandardCharsets.UTF_8);
+        int restoreNow = text.indexOf("public void restoreNow()");
+        int clearPlan = text.indexOf("clearPlan();", restoreNow);
+        int persist = text.indexOf("persistPendingRestore();");
+        assertTrue(restoreNow >= 0 && clearPlan > restoreNow,
+                "restoreNow must reach clearPlan");
+        assertTrue(persist > restoreNow && persist < clearPlan,
+                "unrestored columns must be written to the ledger before clearPlan destroys the plan");
     }
 }

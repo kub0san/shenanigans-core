@@ -15,6 +15,7 @@ import org.bukkit.entity.Item;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.scheduler.BukkitRunnable;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -186,6 +187,8 @@ public final class DomainFloor implements AutoCloseable {
      * pending; each entry is removed when its load completes (or fails).
      */
     private final Set<Long> inFlightChunks = new HashSet<>();
+    /** Bounded retries for a normal-path chunk reload before its blocks are saved to the ledger. */
+    private final Map<Long, Integer> chunkLoadAttempts = new HashMap<>();
     /** The radius the floor is asked to reach; the front follows it. */
     private double desiredProgress;
     private final Map<UUID, Lifted> lifted = new LinkedHashMap<>();
@@ -983,9 +986,63 @@ public final class DomainFloor implements AutoCloseable {
                 restoreColumn(column);
             }
         }
+        // Issue #35: columns in unloaded chunks could not be handed back. Persist them before the
+        // plan is cleared; the next enable replays them with async chunk loads.
+        persistPendingRestore();
         finished = true;
         restoreEntities();
         clearPlan();
+    }
+
+    /**
+     * Writes every still-unrestored block to the durable ledger. Called only from the emergency
+     * restore, where there is no future tick in which to load the missing chunks.
+     */
+    private void persistPendingRestore() {
+        savePendingColumns(columnRestored, true);
+    }
+
+    /**
+     * Persists the blocks of the columns marked unrestored in {@code mask}. The same path serves the
+     * emergency shutdown restore and a normal-path chunk load that failed after its retry budget.
+     */
+    private boolean savePendingColumns(boolean[] mask, boolean replayNow) {
+        if (!prepared || restoreOrder == null || mask == null || changeOriginal == null) return false;
+        ShenanigansCore plugin = ShenanigansCore.getInstance();
+        if (plugin == null) return false;
+        String[] originals = new String[changeOriginal.length];
+        for (int i = 0; i < originals.length; i++) {
+            BlockData data = changeOriginal[i];
+            originals[i] = data == null ? null : data.getAsString();
+        }
+        List<DomainFloorRestoreLedger.Block> pending = DomainFloorRestoreLedger.collectPending(
+                columnX, columnZ, columnChangeStart, changeY, originals, mask, columnCount);
+        if (pending.isEmpty()) return false;
+        UUID owner = sessionId == null
+                ? UUID.nameUUIDFromBytes(("domainfloor:" + world.getUID() + ":" + cx + ":" + cz)
+                        .getBytes(StandardCharsets.UTF_8))
+                : sessionId;
+        try {
+            boolean saved = new DomainFloorRestoreLedger(plugin.getDataFolder())
+                    .appendMerge(owner, world.getUID(), pending);
+            if (saved) {
+                plugin.getLogger().warning("Saved " + pending.size()
+                        + " domain floor block(s) for restoration (unloaded chunks).");
+            } else {
+                plugin.getLogger().severe("Could NOT save " + pending.size()
+                        + " domain floor block(s); they may remain in the world until a manual restore.");
+            }
+            // If the plugin is still alive, drain the ledger in this session too; the replay
+            // driver is single-flight.
+            if (saved && replayNow && plugin.isEnabled()) {
+                DomainFloorRestoreLedger.replay(plugin, plugin.getLogger());
+            }
+            return saved;
+        } catch (RuntimeException e) {
+            plugin.getLogger().log(Level.WARNING,
+                    "Could not save pending domain floor restore blocks", e);
+            return false;
+        }
     }
 
     /**
@@ -1114,12 +1171,42 @@ public final class DomainFloor implements AutoCloseable {
             inFlightChunks.add(key);
             pendingAsyncRestores++;
             try {
-                world.getChunkAtAsync(chunkX, chunkZ).thenAccept(chunk ->
+                // whenComplete (not thenAccept): a failed load must still release the pending
+                // counter and retry budget, or readyToFinish can never become true (#35 family).
+                world.getChunkAtAsync(chunkX, chunkZ).whenComplete((chunk, error) ->
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             try {
                                 // Shutdown/reload empties the plan via clearPlan(); never
                                 // index the zeroed column arrays from a late callback (F-54).
-                                if (!finished && !closed && prepared && restoreOrder != null) {
+                                if (error != null) {
+                                    int attempt = chunkLoadAttempts.merge(key, 1, Integer::sum);
+                                    if (attempt >= 3) {
+                                        // Hand the still-unrestored blocks to the durable ledger
+                                        // and mark the columns done so this restore can finish.
+                                        boolean[] mask = new boolean[columnCount];
+                                        Arrays.fill(mask, true);
+                                        for (int column : columns) {
+                                            if (column >= 0 && column < mask.length) mask[column] = false;
+                                        }
+                                        boolean saved = savePendingColumns(mask, true);
+                                        // Either way the retry budget is exhausted; a permanently
+                                        // failing disk must not leave this restore unfinished forever.
+                                        for (int column : columns) {
+                                            if (column >= 0 && column < columnRestored.length) {
+                                                columnRestored[column] = true;
+                                            }
+                                        }
+                                        plugin.getLogger().severe("Gave up reloading chunk " + chunkX + ","
+                                                + chunkZ + " for a domain floor restore after " + attempt
+                                                + " attempts; pending blocks "
+                                                + (saved ? "were saved to the ledger."
+                                                        : "COULD NOT BE SAVED — they may remain in the world."));
+                                    } else {
+                                        plugin.getLogger().warning("Could not reload chunk " + chunkX + ","
+                                                + chunkZ + " for a domain floor restore (attempt " + attempt
+                                                + "/3): " + error.getMessage());
+                                    }
+                                } else if (!finished && !closed && prepared && restoreOrder != null) {
                                     restoreColumns(columns);
                                 }
                             } finally {
@@ -1216,6 +1303,7 @@ public final class DomainFloor implements AutoCloseable {
         restoreOrder = new int[0];
         columnRestored = new boolean[0];
         inFlightChunks.clear();
+        chunkLoadAttempts.clear();
         // A shutdown clear must not leave late async callbacks holding the floor
         // in a permanently "unfinished" state (F-54).
         pendingAsyncRestores = 0;

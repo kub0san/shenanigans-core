@@ -1,5 +1,6 @@
 package com.hizeric.shenaniganscore.core.session;
 
+import com.hizeric.shenaniganscore.core.terrain.DomainFloorRestoreLedger;
 import org.bukkit.Location;
 
 import java.util.Collections;
@@ -28,6 +29,9 @@ public class SessionManager {
      */
     public boolean startSession(DomainSession session) {
         if (session == null || session.getCaster() == null) return false;
+        // Issue #35: hold new domains until a previous shutdown's floor blocks have been replayed,
+        // so a fresh floor cannot be measured over stale originals at the same coordinates.
+        if (DomainFloorRestoreLedger.isReplaying()) return false;
         UUID uuid = session.getCaster().getUniqueId();
         // Serialize admission so two concurrent casts cannot both pass the
         // per-caster / overlap checks (F-11, F-23).

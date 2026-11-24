@@ -37,6 +37,7 @@ import com.hizeric.shenaniganscore.core.display.CameraShake;
 import com.hizeric.shenaniganscore.battleground.shop.ShopPolicyConfig;
 import com.hizeric.shenaniganscore.core.domain.DomainRegistry;
 import com.hizeric.shenaniganscore.core.domain.DomainRegionGuard;
+import com.hizeric.shenaniganscore.core.terrain.DomainFloorRestoreLedger;
 import com.hizeric.shenaniganscore.core.network.DomainBlockOverlayManager;
 import com.hizeric.shenaniganscore.core.network.PacketEventsBridge;
 import com.hizeric.shenaniganscore.core.network.PacketEventsTransport;
@@ -183,6 +184,9 @@ public final class ShenanigansCore extends JavaPlugin {
         this.globalKitService.load();
 
         this.sessionManager = new SessionManager();
+        // Issue #35: hand back any domain floor blocks a previous shutdown could not restore
+        // because their chunks were unloaded. Replay is scheduled, so it waits for worlds to load.
+        DomainFloorRestoreLedger.replay(this, getLogger());
         this.cooldownManager = new CooldownManager();
         // Sweep finished cooldown entries periodically so the keyed maps stay bounded on long
         // uptimes (F-48). cancelTasks(this) in onDisable tears this task down with the plugin.
@@ -382,6 +386,9 @@ public final class ShenanigansCore extends JavaPlugin {
             if (WorldEditSupport.isAvailable()) WorldEditBridge.setEnabled(false);
         });
 
+        // Release the replay latch explicitly: cancelTasks alone would leave the static guard set
+        // and a same-classloader re-enable could never replay the pending ledger (issue #35).
+        DomainFloorRestoreLedger.cancelReplay();
         // Final safety net: cancel anything that outlived its owner's teardown. This runs
         // after graceful close so it never cuts a domain's floor restore short.
         Bukkit.getScheduler().cancelTasks(this);
