@@ -11,6 +11,7 @@ import com.hizeric.shenaniganscore.battleground.arena.snapshot.ArenaSnapshot;
 import com.hizeric.shenaniganscore.battleground.command.Permissions;
 import com.hizeric.shenaniganscore.battleground.player.ArenaInventories;
 import com.hizeric.shenaniganscore.battleground.player.BattlegroundLock;
+import com.hizeric.shenaniganscore.battleground.menu.base.GuiStyle;
 import com.hizeric.shenaniganscore.core.domain.DomainRegistry;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.Bukkit;
@@ -568,6 +569,15 @@ final class RoundController {
                 // ArenaStore.load() resolves Bukkit worlds and mutates unsynchronised registries;
                 // it is main-thread work and must never stay on the async config thread.
                 boolean ok = result;
+                try {
+                    // Refresh Bukkit's in-memory config.yml object and the GUI style, which
+                    // are otherwise only initialised at enable (SP-LEAD-002 / AUDIT-13).
+                    m.plugin.reloadConfig();
+                    GuiStyle.apply(m.plugin.getDataFolder(), m.plugin.getLogger());
+                } catch (RuntimeException e) {
+                    ok = false;
+                    m.plugin.getLogger().log(Level.SEVERE, "Bukkit config reload failed", e);
+                }
                 try {
                     m.arenaStore.load();
                 } catch (RuntimeException e) {
