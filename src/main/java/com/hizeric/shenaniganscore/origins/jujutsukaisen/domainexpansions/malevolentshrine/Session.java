@@ -172,11 +172,6 @@ public class Session extends DomainSession {
         }
 
         /**
-         * Rotation at {@code now}: a decaying sine around the recorded base,
-         * landing exactly back on that base once the shake has expired. Pitch
-         * is clamped to the legal ±89° range.
-         */
-        /**
          * Combines an already-registered shake with a new one without losing the
          * original base. The newest registration drives amplitude, start and
          * duration; an already-expired active shake contributes nothing, so the
@@ -190,6 +185,11 @@ public class Session extends DomainSession {
                     incoming.startMs, incoming.durationMs);
         }
 
+        /**
+         * Rotation at {@code now}: a decaying sine around the recorded base,
+         * landing exactly back on that base once the shake has expired. Pitch
+         * is clamped to the legal ±89° range.
+         */
         Rotation rotationAt(long now) {
             long elapsed = Math.max(0L, now - startMs);
             if (elapsed >= durationMs) {

@@ -26,11 +26,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * Client-side body/equipment mask for the Rift Cleave dash window.
  *
  * <p>One instance owns one dash. It hides the caster from other clients by applying the invisible
- * flag and registering a short-lived PacketEvents listener that rewrites every
- * {@code ENTITY_EQUIPMENT} packet for the caster into an empty six-slot packet. Because the listener
- * intercepts the server's own authoritative updates, a hotbar switch during the dash cannot race
- * a per-tick resend and leave a stale item on a viewer's client. Viewers then see only the
- * {@link MannequinEchoRenderer} afterimages.</p>
+ * flag and registering a short-lived PacketEvents listener that rewrites equipment packets for
+ * the caster into an empty six-slot packet for third-party viewers only; the caster's own view is
+ * left alone. Because the listener intercepts the server's own authoritative updates, a hotbar
+ * switch during the dash cannot race a per-tick resend and leave a stale item on a viewer's client.
+ * Viewers then see only the {@link MannequinEchoRenderer} afterimages.</p>
  *
  * <p>On restore the listener is unregistered first (otherwise it would cancel the real restore
  * packet), then one equipment packet built from the caster's <em>current</em> inventory is sent to

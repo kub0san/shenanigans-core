@@ -63,7 +63,7 @@ public final class SetupSession {
 
         session.phase = Phase.AWAITING_SELECTION;
         if (!dispatchWand(admin)) {
-            say(admin, "<yellow>Could not hand you the wand automatically — run <white>// wand"
+            say(admin, "<yellow>Could not hand you the wand automatically — run <white>//wand"
                     + "<yellow>, select two corners, and setup will finish on its own.");
         } else {
             say(admin, "<aqua><bold>Setup<reset> <gray>— select two corners with the wand; "
