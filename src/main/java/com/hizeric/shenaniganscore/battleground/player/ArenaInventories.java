@@ -23,6 +23,8 @@ public final class ArenaInventories {
     }
 
     private final Map<UUID, Snapshot> snapshots = new ConcurrentHashMap<>();
+    /** The real inventory captured while the loadout editor is open (issue #39). */
+    private final Map<UUID, Snapshot> editorOriginals = new ConcurrentHashMap<>();
 
     public void captureOnce(UUID uuid, ItemStack[] contents, ItemStack cursor) {
         if (uuid == null) return;
@@ -47,10 +49,27 @@ public final class ArenaInventories {
         return uuid == null ? null : snapshots.remove(uuid);
     }
 
+    /** Captures the inventory an editor is about to overwrite; never touches the hub snapshot. */
+    public void captureEditor(UUID uuid, Snapshot original) {
+        if (uuid == null || original == null) return;
+        editorOriginals.putIfAbsent(uuid, original);
+    }
+
+    /** Returns and consumes the editor's original inventory, or null when no edit is open. */
+    public Snapshot takeEditor(UUID uuid) {
+        return uuid == null ? null : editorOriginals.remove(uuid);
+    }
+
     public void forget(UUID uuid) {
-        if (uuid != null) snapshots.remove(uuid);
+        if (uuid != null) {
+            snapshots.remove(uuid);
+            editorOriginals.remove(uuid);
+        }
     }
 
     public int snapshotCount() { return snapshots.size(); }
-    public void clear() { snapshots.clear(); }
+    public void clear() {
+        snapshots.clear();
+        editorOriginals.clear();
+    }
 }

@@ -26,6 +26,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
@@ -70,11 +71,26 @@ public final class InlineLoadoutScreen extends GuiScreen {
                 .computeIfAbsent(p.getUniqueId(), id -> new java.util.LinkedHashMap<>());
         if (values.containsKey(SEED_KEY)) return;
         BattlegroundPlayer data = data();
-        plugin.getBattlegroundManager().inventories().captureOnce(p.getUniqueId(),
-                p.getInventory().getContents(), p.getItemOnCursor());
+        plugin.getBattlegroundManager().inventories().captureEditor(p.getUniqueId(),
+                new com.hizeric.shenaniganscore.battleground.player.ArenaInventories.Snapshot(
+                        p.getInventory().getContents(), p.getItemOnCursor()));
         p.setItemOnCursor(null);
         applyBoard(p, LoadoutCodec.decode(data == null ? "" : data.layoutData(), GlobalKit.kit()).items());
         values.put(SEED_KEY, Boolean.TRUE);
+    }
+
+    /**
+     * The kit board is only an editor: give the player back the real inventory on every close,
+     * including ESC. Without this the live board became the hub snapshot at the next deploy and
+     * round end handed the kit back instead of the player's items (issue #39).
+     */
+    @Override
+    protected void onClose(InventoryCloseEvent event) {
+        var original = plugin.getBattlegroundManager().inventories().takeEditor(player.getUniqueId());
+        if (original != null) original.restoreTo(player);
+        // A later open must re-seed the board from the restored inventory.
+        Map<String, Object> values = session.stagedStore().get(player.getUniqueId());
+        if (values != null) values.remove(SEED_KEY);
     }
 
     private static ItemStack[] liveBoard(Player p) {
