@@ -306,6 +306,9 @@ public final class ShopCatalog {
 
     private void warn(String message, Throwable cause) {
         if (plugin != null) plugin.getLogger().log(Level.SEVERE, message, cause);
-        else { System.err.println(message); cause.printStackTrace(System.err); }
+        else {
+            System.err.println(message);
+            if (cause != null) cause.printStackTrace(System.err);
+        }
     }
 }

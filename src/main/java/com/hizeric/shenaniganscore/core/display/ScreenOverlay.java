@@ -52,6 +52,7 @@ public final class ScreenOverlay {
     private final List<TextDisplay> quads = new ArrayList<>();
     private boolean closed;
     private boolean attached;
+    private boolean opened;
 
     public ScreenOverlay(Player viewer) {
         this.viewer = Objects.requireNonNull(viewer, "viewer");
@@ -64,7 +65,8 @@ public final class ScreenOverlay {
 
     /** Creates {@code count} stacked quads, all transparent, shown only to the viewer. */
     public void open(int count) {
-        if (closed) return;
+        if (closed || opened) return;
+        opened = true;
         ShenanigansCore plugin = ShenanigansCore.getInstance();
         for (int i = 0; i < count; i++) {
             TextDisplay quad = QuadUtils.spawn(viewer.getEyeLocation(), Display.Billboard.CENTER, 8.0f, true);

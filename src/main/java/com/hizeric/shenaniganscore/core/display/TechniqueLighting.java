@@ -70,9 +70,11 @@ public final class TechniqueLighting {
             ref = old;
         }
         for (Map.Entry<Location, Integer> e : want.entrySet()) {
+            Integer level = e.getValue();
+            if (e.getKey() == null || level == null) continue;
             Integer prev = lights.get(e.getKey());
-            if (prev == null || !prev.equals(e.getValue())) {
-                send.put(e.getKey(), LIGHTS[Math.max(0, Math.min(15, e.getValue()))]);
+            if (prev == null || !prev.equals(level)) {
+                send.put(e.getKey(), LIGHTS[Math.max(0, Math.min(15, level))]);
             }
             ref = e.getKey();
         }

@@ -51,10 +51,16 @@ public abstract class DomainSession {
 
     protected DomainSession(Player caster, Location center, double radius) {
         this.caster = caster;
-        this.center = center.clone();
+        this.center = center == null ? null : center.clone();
         this.radius = radius;
         // Floor plane is the caster's Y at domain creation time.
-        this.planeY = caster == null ? this.center.getY() : caster.getLocation().getY();
+        if (caster != null) {
+            this.planeY = caster.getLocation().getY();
+        } else if (this.center != null) {
+            this.planeY = this.center.getY();
+        } else {
+            this.planeY = 0.0;
+        }
     }
 
     /** Marks the session as running. Called by {@link SessionManager} on start. */
@@ -73,7 +79,7 @@ public abstract class DomainSession {
 
     /** The owning session key — the caster's UUID. Used by the domain block registry. */
     public final UUID getUniqueId() {
-        return caster.getUniqueId();
+        return caster == null ? null : caster.getUniqueId();
     }
 
     public final Location getCenter() {

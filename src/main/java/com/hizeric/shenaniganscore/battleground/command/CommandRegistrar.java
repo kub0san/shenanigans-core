@@ -131,12 +131,13 @@ public final class CommandRegistrar {
                 problems.add("Null root node.");
                 continue;
             }
-            if (!rootNames.add(root.name().toLowerCase(Locale.ROOT))) {
+            if (root.name() != null && !rootNames.add(root.name().toLowerCase(Locale.ROOT))) {
                 problems.add("Duplicate command root: " + root.name());
             }
-            for (String alias : root.aliases()) {
+            if (root.aliases() != null) for (String alias : root.aliases()) {
+                if (alias == null) continue;
                 String key = alias.toLowerCase(Locale.ROOT);
-                if (key.equals(root.name().toLowerCase(Locale.ROOT))) {
+                if (key.equals(root.name() == null ? "" : root.name().toLowerCase(Locale.ROOT))) {
                     problems.add("Root '" + root.name() + "' is also its own alias.");
                 }
                 if (!rootNames.add(key)) {
@@ -190,6 +191,14 @@ public final class CommandRegistrar {
 
         Set<String> childNames = new HashSet<>();
         for (CommandNode child : node.children()) {
+            if (child == null) {
+                problems.add("Null child under " + path + ".");
+                continue;
+            }
+            if (child.name() == null) {
+                problems.add("Child with null name under " + path + ".");
+                continue;
+            }
             String childPath = path + " " + child.name();
             if (!childNames.add(child.name().toLowerCase(Locale.ROOT))) {
                 problems.add("Duplicate child '" + child.name() + "' under " + path + ".");

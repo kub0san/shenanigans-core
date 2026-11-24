@@ -24,6 +24,7 @@ public final class PlayerRepository {
     }
 
     public Optional<PlayerRecord> load(UUID uuid) {
+        if (uuid == null) return Optional.empty();
         try (Connection connection = database.connection();
              PreparedStatement statement = connection.prepareStatement(
                      "SELECT uuid, data FROM players WHERE uuid = ?")) {

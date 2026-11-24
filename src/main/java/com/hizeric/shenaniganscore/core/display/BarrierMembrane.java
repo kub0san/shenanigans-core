@@ -99,32 +99,42 @@ public final class BarrierMembrane {
 
         Location spawnAt = new Location(world, cx, cy, cz);
 
-        for (int i = 0; i < count; i++) {
-            BlockDisplay plate = world.spawn(spawnAt, BlockDisplay.class, display -> {
-                display.setBlock(material.createBlockData());
-                display.setPersistent(false);
-                display.setViewRange(viewRange);
+        try {
+            for (int i = 0; i < count; i++) {
+                BlockDisplay plate = world.spawn(spawnAt, BlockDisplay.class, display -> {
+                    display.setBlock(material.createBlockData());
+                    display.setPersistent(false);
+                    display.setViewRange(viewRange);
 
-                // Brightness raises the block's own light; the glow colour
-                // draws a solid cyan silhouette around it. Together they turn
-                // an ordinary block into a sheet of light.
-                display.setBrightness(new Display.Brightness(15, 15));
-                display.setGlowing(true);
-                display.setGlowColorOverride(GLOW);
+                    // Brightness raises the block's own light; the glow colour
+                    // draws a solid cyan silhouette around it. Together they turn
+                    // an ordinary block into a sheet of light.
+                    display.setBrightness(new Display.Brightness(15, 15));
+                    display.setGlowing(true);
+                    display.setGlowColorOverride(GLOW);
 
-                display.setInterpolationDelay(0);
-                display.setInterpolationDuration(INTERPOLATION_TICKS);
-                display.setTeleportDuration(INTERPOLATION_TICKS);
+                    display.setInterpolationDelay(0);
+                    display.setInterpolationDuration(INTERPOLATION_TICKS);
+                    display.setTeleportDuration(INTERPOLATION_TICKS);
 
-                TransformUtils.applyTransform(
-                        display,
-                        0.01f, 0.01f, 0.01f,
-                        0.0f, 0.0f, 0.0f,
-                        INTERPOLATION_TICKS
-                );
-            });
+                    TransformUtils.applyTransform(
+                            display,
+                            0.01f, 0.01f, 0.01f,
+                            0.0f, 0.0f, 0.0f,
+                            INTERPOLATION_TICKS
+                    );
+                });
 
-            plates[i] = plate;
+                plates[i] = plate;
+            }
+        } catch (Throwable failure) {
+            // A partial construction must not strand display entities in the world.
+            for (BlockDisplay plate : plates) {
+                if (plate != null) {
+                    try { plate.remove(); } catch (Throwable ignored) { }
+                }
+            }
+            throw failure;
         }
     }
 

@@ -119,6 +119,7 @@ public class Barrier implements AutoCloseable {
 
     /** Records how far the domain's real floor has reached. */
     public void setFloorFrontRadius(double floorRadius) {
+        requireMainThread();
         if (!Double.isFinite(floorRadius) || floorRadius < 0.0) {
             return;
         }

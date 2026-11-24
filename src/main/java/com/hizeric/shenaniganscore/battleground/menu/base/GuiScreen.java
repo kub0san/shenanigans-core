@@ -184,8 +184,9 @@ public abstract class GuiScreen {
             Bukkit.getScheduler().runTask(session.plugin(), () -> {
                 // Release before redrawing so a refresh raised during redraw schedules a new task.
                 refreshScheduled.set(false);
-                if (chest == null) return;
-                if (player.getOpenInventory().getTopInventory() != chest.getInventory()) return;
+                if (chest == null || player == null) return;
+                var open = player.getOpenInventory();
+                if (open == null || open.getTopInventory() != chest.getInventory()) return;
                 redraw();
                 chest.update();
                 if (paintsInventory()) afterInventory(chest.getInventory(), true);

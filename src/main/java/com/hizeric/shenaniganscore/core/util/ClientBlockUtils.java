@@ -77,7 +77,8 @@ public final class ClientBlockUtils {
     /** Queues one fake block and records it as part of the active overlay. */
     public static void sendFakeBlock(Player player, Location location, BlockData data) {
         requireMainThread();
-        if (player == null || location == null || data == null || !player.isOnline()) return;
+        if (player == null || location == null || location.getWorld() == null
+                || data == null || !player.isOnline()) return;
 
         BlockKey key = keyOf(location);
         if (!isValidTarget(player.getWorld(), key)) return;
@@ -96,7 +97,7 @@ public final class ClientBlockUtils {
         for (Map.Entry<? extends Location, BlockData> entry : batch.entrySet()) {
             Location location = entry.getKey();
             BlockData data = entry.getValue();
-            if (location == null || data == null) continue;
+            if (location == null || location.getWorld() == null || data == null) continue;
 
             BlockKey key = keyOf(location);
             if (!isValidTarget(player.getWorld(), key)) continue;
@@ -261,12 +262,15 @@ public final class ClientBlockUtils {
                 try {
                     transport.send(player, batch);
                 } catch (RuntimeException exception) {
-                    ShenanigansCore.getInstance().getLogger().log(
-                            Level.WARNING,
-                            "Failed to send fake-block batch to " + player.getName()
-                                    + " (" + batch.size() + " changes)",
-                            exception
-                    );
+                    ShenanigansCore plugin = ShenanigansCore.getInstance();
+                    if (plugin != null) {
+                        plugin.getLogger().log(
+                                Level.WARNING,
+                                "Failed to send fake-block batch to " + player.getName()
+                                        + " (" + batch.size() + " changes)",
+                                exception
+                        );
+                    }
                 }
                 batchesSent++;
             }

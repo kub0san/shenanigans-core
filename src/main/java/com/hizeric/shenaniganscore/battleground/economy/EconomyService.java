@@ -33,6 +33,7 @@ public final class EconomyService {
 
         BattlegroundPlayer killerData = store.get(killer.getUniqueId());
         BattlegroundPlayer victimData = store.get(victim.getUniqueId());
+        if (killerData == null || victimData == null) return 0;
         victimData.recordDeath();
         store.markDirty(victim.getUniqueId());
 
@@ -113,6 +114,7 @@ public final class EconomyService {
         if (entry == null || !entry.enabled()) {
             return new CastGate(false, 0, data == null ? 0 : data.streak(), false);
         }
+        if (data == null) return new CastGate(false, 0, 0, false);
         int required = Math.max(0, entry.streakRequired());
         boolean owned = data.owns(entry.id());
         int streak = data.streak();
