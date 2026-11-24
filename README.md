@@ -77,3 +77,14 @@ Made some changes? Run `/bg reload` to apply them!
 ## License
 
 Licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
+
+## Test environment proof notes
+
+Recorded from an end-to-end proof of the shared Leaf 26.3-27 test server — operational details that are easy to miss on a fresh run.
+
+- The server is driven by `C:\Tools\global-test-server-26.3\TestServer.ps1`; `.\TestServer.ps1 -Help` lists every command and the MCP map.
+- Launch uses Zulu Java 25 with `-Xms512m -Xmx1024m` and `-XX:MaxMetaspaceSize=512m`. Metaspace was raised from 256m because the full 24-plugin live stack OOMs at 256m.
+- `server.properties` sets `pause-when-empty-seconds=-1`. Otherwise Leaf pauses an empty server and Craftwire hub→server tools time out.
+- Always call Craftwire `list_instances` before `server_info` — instance IDs change on every restart.
+- A restart rotates `logs\latest.log` into `*.log.gz`; archive it before relying on `TestServer.ps1 verify`.
+- Player data is scrubbed except qcart (`befc5d95-fd63-4cae-b0f5-7c2fb271c699`); AgentView (`9f405998-7c7d-33c3-9633-da8ed65bc604`) is tolerated for screenshot captures, and `reset` returns to the qcart-only baseline.
