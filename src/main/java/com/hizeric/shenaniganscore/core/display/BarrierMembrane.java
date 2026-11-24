@@ -21,8 +21,8 @@ import com.hizeric.shenaniganscore.core.util.MathUtil;
  * tall, bright curtain instead of a single-block hoop. Each plate is rotated
  * with JOML so its face is <i>tangent to the sphere</i> — the curtain follows
  * the curvature of the barrier, leaning with the latitude it is climbing —
- * and every plate glows cyan, so the edge reads as a solid sheet of light
- * rather than a line of blocks.</p>
+ * and every plate is lit at full brightness, so the edge reads as a solid sheet
+ * of light rather than a line of blocks.</p>
  *
  * <p>Two short-lived dust echoes trail behind the curtain, sparks stream along
  * its circumference and the wall "breathes" (small radius and height waves),
@@ -47,9 +47,6 @@ public final class BarrierMembrane {
     private static final double PLATE_SKIRT = 0.55;
     /** Below this ring radius the dome has closed; the curtain stops drawing. */
     private static final double MIN_RING_RADIUS = 0.4;
-
-    /** Blinding cyan outline, as requested. */
-    private static final Color GLOW = Color.fromRGB(60, 235, 255);
 
     // Particle palette: hot white core, cyan halo, cold after-image.
     private static final Particle.DustOptions CORE_DUST =
@@ -106,12 +103,9 @@ public final class BarrierMembrane {
                     display.setPersistent(false);
                     display.setViewRange(viewRange);
 
-                    // Brightness raises the block's own light; the glow colour
-                    // draws a solid cyan silhouette around it. Together they turn
-                    // an ordinary block into a sheet of light.
+                    // Full brightness raises the block's own light so the
+                    // curtain reads as a sheet of light, not a row of blocks.
                     display.setBrightness(new Display.Brightness(15, 15));
-                    display.setGlowing(true);
-                    display.setGlowColorOverride(GLOW);
 
                     display.setInterpolationDelay(0);
                     display.setInterpolationDuration(INTERPOLATION_TICKS);

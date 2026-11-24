@@ -1,6 +1,5 @@
 package com.hizeric.shenaniganscore.core.display;
 
-import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -25,9 +24,9 @@ import com.hizeric.shenaniganscore.core.util.MathUtil;
  *
  * <p>This dome fills that hole. It is a sparse shell of large, tangent
  * {@link BlockDisplay} plates on the upper hemisphere, styled after the
- * membrane (dark block, faint cyan glow) so the two read as one continuous
- * wall instead of two separate effects. It is deliberately cinema, not a fake
- * wall: gaps are acceptable, the silhouette is what matters. It costs a few
+ * membrane (dark block, lit at full brightness) so the two read as one
+ * continuous wall instead of two separate effects. It is deliberately cinema,
+ * not a fake wall: gaps are acceptable, the silhouette is what matters. It costs a few
  * hundred displays, once per domain, instead of tens of thousands of fake
  * block packets.</p>
  *
@@ -44,9 +43,6 @@ public final class ShellDome {
     private static final int MAX_PLATES_PER_RING = 48;
     private static final int MIN_PLATES_PER_RING = 14;
     private static final int TOTAL_PLATE_BUDGET = 280;
-
-    /** Blinding edge of the light, deliberately dimmer than the membrane's. */
-    private static final Color GLOW = Color.fromRGB(56, 168, 214);
 
     private final World world;
     private final double cx;
@@ -165,8 +161,6 @@ public final class ShellDome {
                     display.setPersistent(false);
                     display.setViewRange((float) Math.max(64.0, radius + 32.0));
                     display.setBrightness(new Display.Brightness(13, 13));
-                    display.setGlowing(true);
-                    display.setGlowColorOverride(GLOW);
                     display.setInterpolationDelay(0);
                     display.setInterpolationDuration(10);
                     display.setTeleportDuration(0);
