@@ -147,8 +147,11 @@ public class Session extends DomainSession {
     private final int[] lastStep = new int[24];
     private final List<Double> ripples = new ArrayList<>();
 
+    /** A viewer rotation sampled from a decaying shake at a point in time. */
+    record Rotation(float yaw, float pitch) { }
+
     /** One active camera shake for a viewer. Oscillates around a fixed base rotation and decays. */
-    private static final class Shake {
+    static final class Shake {
         final float baseYaw;
         final float basePitch;
         final double amplitude;   // degrees at t = 0
@@ -156,11 +159,34 @@ public class Session extends DomainSession {
         final long durationMs;
 
         Shake(float baseYaw, float basePitch, double amplitude, long durationMs) {
+            this(baseYaw, basePitch, amplitude, System.currentTimeMillis(), durationMs);
+        }
+
+        /** Explicit clock variant: lets the curve be tested without waiting on a real timer. */
+        Shake(float baseYaw, float basePitch, double amplitude, long startMs, long durationMs) {
             this.baseYaw = baseYaw;
             this.basePitch = basePitch;
             this.amplitude = amplitude;
-            this.startMs = System.currentTimeMillis();
+            this.startMs = startMs;
             this.durationMs = Math.max(1L, durationMs);
+        }
+
+        /**
+         * Rotation at {@code now}: a decaying sine around the recorded base,
+         * landing exactly back on that base once the shake has expired. Pitch
+         * is clamped to the legal ±89° range.
+         */
+        Rotation rotationAt(long now) {
+            long elapsed = now - startMs;
+            if (elapsed >= durationMs) {
+                return new Rotation(baseYaw, basePitch);
+            }
+            double progress = elapsed / (double) durationMs;
+            double decay = Math.pow(1.0 - progress, 1.5); // hard at the start, feathered at the end
+            double yawOffset = Math.sin(elapsed * 0.021) * amplitude * decay;
+            double pitchOffset = Math.sin(elapsed * 0.026 + 1.4) * amplitude * 0.65 * decay;
+            float pitch = (float) Math.max(-89.0, Math.min(89.0, basePitch + pitchOffset));
+            return new Rotation(baseYaw + (float) yawOffset, pitch);
         }
     }
 
@@ -558,6 +584,17 @@ public class Session extends DomainSession {
         }
     }
 
+    /**
+     * Registers a session-owned rotation jitter for one player. Their current
+     * facing becomes the shake's base, so the per-tick driver restores it
+     * exactly at expiry — and {@link #close()} restores it if the domain ends
+     * mid-shake.
+     */
+    public void jitter(Player player, double amplitude, long durationMs) {
+        shakes.put(player.getUniqueId(), new Shake(player.getLocation().getYaw(),
+                player.getLocation().getPitch(), amplitude, System.currentTimeMillis(), durationMs));
+    }
+
     /** Per-tick driver for {@link Shake}s. Cheap no-op while nothing is shaking. */
     private void applyShakes() {
         if (shakes.isEmpty()) return;
@@ -579,12 +616,8 @@ public class Session extends DomainSession {
                 it.remove();
                 continue;
             }
-            double progress = elapsed / (double) s.durationMs;
-            double decay = Math.pow(1.0 - progress, 1.5); // hard at the start, feathered at the end
-            double yawOffset = Math.sin(elapsed * 0.021) * s.amplitude * decay;
-            double pitchOffset = Math.sin(elapsed * 0.026 + 1.4) * s.amplitude * 0.65 * decay;
-            float pitch = (float) Math.max(-89.0, Math.min(89.0, s.basePitch + pitchOffset));
-            p.setRotation(s.baseYaw + (float) yawOffset, pitch);
+            Rotation rotation = s.rotationAt(now);
+            p.setRotation(rotation.yaw(), rotation.pitch());
         }
     }
 

@@ -190,11 +190,9 @@ public final class Cleave {
         world.spawnParticle(Particle.SQUID_INK, hitCenter, 3, 0.2, 0.2, 0.2, 0.02);
 
 
-        // Screen shake: jitter view + small velocity, like being torn open
+        // Screen shake: session-owned rotation jitter + small velocity, like being torn open
         if (entity instanceof Player p) {
-            float yaw = p.getLocation().getYaw();
-            float pitch = p.getLocation().getPitch();
-            p.setRotation(yaw + r.nextFloat(-7f, 7f), pitch + r.nextFloat(-3f, 3f));
+            session.jitter(p, 7.0, 200L);
             double dmg = Math.max(1.0, maxHealth * damageFraction());
             p.setVelocity(p.getVelocity().add(new Vector(
                     (r.nextDouble() - 0.5) * 0.55,
