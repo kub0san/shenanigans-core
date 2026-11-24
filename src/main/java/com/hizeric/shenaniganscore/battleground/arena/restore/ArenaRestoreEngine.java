@@ -140,7 +140,7 @@ public final class ArenaRestoreEngine implements ArenaRestorer {
         this.plugin = plugin;
         this.logger = logger;
         this.onTierOneComplete = onTierOneComplete;
-        this.nanoClock = nanoClock;
+        this.nanoClock = nanoClock == null ? System::nanoTime : nanoClock;
         // Production gets animations by default; injected-Deps (tests) stay silent.
         this.effects = deps == null
                 ? new RestoreAnimator(() -> RestoreAnimator.Settings.from(ArenaRuntimeConfig.current()))
