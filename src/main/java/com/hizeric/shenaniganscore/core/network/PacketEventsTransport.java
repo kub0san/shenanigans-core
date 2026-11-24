@@ -91,15 +91,35 @@ public final class PacketEventsTransport implements ClientBlockUtils.BlockChange
 
     /** The real terminal send step: projected fields → state → packet → player manager. */
     private static void sendThroughPacketEvents(Player player, BlockChange change) {
-        WrappedBlockState state = WrappedBlockState.getByString(change.state());
-        if (state == null) {
-            throw new IllegalStateException(
-                    "PacketEvents could not map block state: " + change.state());
-        }
-
+        WrappedBlockState state = mapBlockState(change.state());
         WrapperPlayServerBlockChange packet = new WrapperPlayServerBlockChange(
                 new Vector3i(change.x(), change.y(), change.z()), state);
         PacketEvents.getAPI().getPlayerManager().sendPacket(player, packet);
+    }
+
+    /**
+     * Resolves a state key and fails loudly when PacketEvents silently substitutes AIR.
+     *
+     * <p>{@code WrappedBlockState.getByString()} never returns {@code null} for an
+     * unmapped key — it returns an AIR state — so a plain null check can never detect
+     * the mismatch (SP-F-001). The old null-only guard is kept for safety, and the
+     * requested type name is compared against the resolved one.</p>
+     */
+    static WrappedBlockState mapBlockState(String stateKey) {
+        WrappedBlockState state = WrappedBlockState.getByString(stateKey);
+        if (state == null || state.getType() == null) {
+            throw new IllegalStateException("PacketEvents could not map block state: " + stateKey);
+        }
+        String requested = stateKey;
+        int bracket = requested.indexOf('[');
+        if (bracket >= 0) requested = requested.substring(0, bracket);
+        boolean requestedAir = requested.equals("air") || requested.endsWith(":air")
+                || requested.endsWith("_air");
+        if (state.getType().isAir() && !requestedAir) {
+            throw new IllegalStateException("PacketEvents silently mapped block state '"
+                    + stateKey + "' to AIR; the state is unmapped on this server version.");
+        }
+        return state;
     }
 
     /** Pure mapping from a queued change to packet fields; needs no live server or API singleton. */

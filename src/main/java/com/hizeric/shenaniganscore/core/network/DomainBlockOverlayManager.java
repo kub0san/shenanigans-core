@@ -268,8 +268,19 @@ public final class DomainBlockOverlayManager {
 
         PacketEventsBridge.requireReady();
         String state = data.getAsString(true);
-        WrappedBlockState wrapped = WrappedBlockState.getByString(state);
-        if (wrapped == null) return;
+        WrappedBlockState wrapped;
+        try {
+            // getByString() returns AIR for unmapped states, so a null check alone
+            // can never detect a mismatch (SP-F-001).
+            wrapped = PacketEventsTransport.mapBlockState(state);
+        } catch (RuntimeException e) {
+            ShenanigansCore plugin = ShenanigansCore.getInstance();
+            if (plugin != null) {
+                plugin.getLogger().warning("Skipping unmapped block overlay state '" + state + "': "
+                        + e.getMessage());
+            }
+            return;
+        }
         try {
             PacketEvents.getAPI().getPlayerManager().sendPacket(
                     player,
