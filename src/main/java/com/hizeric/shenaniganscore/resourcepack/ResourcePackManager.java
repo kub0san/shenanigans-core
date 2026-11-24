@@ -33,6 +33,8 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -298,12 +300,18 @@ public final class ResourcePackManager implements Listener {
 
     /** Minimal HTTP/1.1 responder — no jdk.httpserver module dependency. */
     private static final class HttpServer {
+        /** Admission cap: a client-reachable listener must not accept unbounded sockets (issue #48). */
+        private static final int MAX_CONNECTIONS = 64;
+        private static final long ACCEPT_WARNING_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(10);
+
         private final ServerSocket socket;
         private final byte[] body;
         private final Logger logger;
         private volatile boolean running = true;
         private Thread acceptThread;
         private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
+        private final Semaphore permits = new Semaphore(MAX_CONNECTIONS);
+        private long lastAcceptWarning;
 
         HttpServer(int port, byte[] body, Logger logger) throws IOException {
             this.body = body;
@@ -323,10 +331,31 @@ public final class ResourcePackManager implements Listener {
             while (running) {
                 try {
                     Socket client = socket.accept();
-                    workers.submit(() -> serve(client));
+                    if (!permits.tryAcquire()) {
+                        // Over the cap: close immediately so no FD or worker is consumed.
+                        try { client.close(); } catch (IOException ignored) { }
+                        continue;
+                    }
+                    try {
+                        workers.submit(() -> {
+                            try {
+                                serve(client);
+                            } finally {
+                                permits.release();
+                            }
+                        });
+                    } catch (RuntimeException e) {
+                        permits.release();
+                        throw e;
+                    }
                 } catch (IOException e) {
                     if (!running) break;
-                    logger.log(Level.WARNING, "Resource pack accept failed", e);
+                    // FD exhaustion makes accept fail in a tight loop; rate-limit the warning.
+                    long now = System.nanoTime();
+                    if (now - lastAcceptWarning >= ACCEPT_WARNING_INTERVAL_NANOS) {
+                        lastAcceptWarning = now;
+                        logger.log(Level.WARNING, "Resource pack accept failed", e);
+                    }
                 }
             }
         }
@@ -372,7 +401,7 @@ public final class ResourcePackManager implements Listener {
             while ((b = in.read()) != -1) {
                 if (b == '\n' && prev == '\r') break;
                 baos.write(b);
-                if (baos.size() > 8192) break;
+                if (baos.size() >= 8192) break;
                 prev = b;
             }
             String line = baos.toString(StandardCharsets.ISO_8859_1);
@@ -386,6 +415,13 @@ public final class ResourcePackManager implements Listener {
             running = false;
             try { socket.close(); } catch (IOException ignored) { /* socket already closed during shutdown */ }
             workers.shutdownNow();
+            try {
+                if (!workers.awaitTermination(2, TimeUnit.SECONDS)) {
+                    logger.warning("Resource pack workers did not finish within 2s of shutdown");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             if (acceptThread != null) {
                 try { acceptThread.join(2000); } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();

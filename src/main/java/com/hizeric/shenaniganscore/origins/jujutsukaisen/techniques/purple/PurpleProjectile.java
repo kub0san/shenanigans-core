@@ -2,6 +2,7 @@ package com.hizeric.shenaniganscore.origins.jujutsukaisen.techniques.purple;
 
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
+import com.hizeric.shenaniganscore.core.util.MathUtil;
 import com.hizeric.shenaniganscore.origins.jujutsukaisen.techniques.WindupSlowness;
 import com.hizeric.shenaniganscore.origins.jujutsukaisen.techniques.WindupSlownessCleanup;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -455,7 +456,7 @@ public class PurpleProjectile extends BukkitRunnable {
 
     /** One enormous, armor-piercing hit and a shove along {@code push}. */
     private void hitEntity(LivingEntity victim, Vector push) {
-        double dmg = Math.max(2.0, damagePerPower * power);
+        double dmg = MathUtil.hitDamage(damagePerPower * power, damagePerPower, 2.0);
 
         // Sure-hit through invulnerability frames.
         victim.setNoDamageTicks(0);

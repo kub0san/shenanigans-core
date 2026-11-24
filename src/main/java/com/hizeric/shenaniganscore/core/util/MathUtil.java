@@ -26,6 +26,22 @@ public final class MathUtil {
         return (int) Math.max(1, Math.round(base * factor));
     }
 
+    /**
+     * Applies a technique's shipped minimum impact to a computed hit, but only when the configured
+     * damage is positive. The tuning holder accepts 0 as a valid value (it means "deal no damage"),
+     * so flooring it back to 1–2 hearts silently overrides the configuration (issue #37 / SP-C-009).
+     *
+     * @param computed   the damage after power/falloff modifiers
+     * @param configured the live configured per-power damage
+     * @param minimum    the shipped minimum applied only for a positive configuration
+     */
+    public static double hitDamage(double computed, double configured, double minimum) {
+        requireFinite(computed, "computed");
+        requireFinite(configured, "configured");
+        requireFinite(minimum, "minimum");
+        return configured > 0.0 ? Math.max(minimum, computed) : 0.0;
+    }
+
     public static double clamp(double value, double min, double max) {
         requireFinite(value, "value");
         requireFinite(min, "min");

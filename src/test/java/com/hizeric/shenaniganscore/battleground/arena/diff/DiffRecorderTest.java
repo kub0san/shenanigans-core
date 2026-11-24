@@ -30,7 +30,7 @@ class DiffRecorderTest {
     @Test
     void keepsValidPositionsAndEnqueuesThePackedKey() {
         Capture sink = new Capture();
-        DiffRecorder recorder = new DiffRecorder(() -> ARENA, (x, y, z) -> false, sink);
+        DiffRecorder recorder = new DiffRecorder(() -> ARENA, (worldId, x, y, z) -> false, sink);
 
         assertTrue(recorder.record(5, 64, 5));
 
@@ -40,7 +40,7 @@ class DiffRecorderTest {
     @Test
     void dropsPositionsOutsideTheInjectedRegion() {
         Capture sink = new Capture();
-        DiffRecorder recorder = new DiffRecorder(() -> ARENA, (x, y, z) -> false, sink);
+        DiffRecorder recorder = new DiffRecorder(() -> ARENA, (worldId, x, y, z) -> false, sink);
 
         assertFalse(recorder.record(11, 64, 5));
         assertFalse(recorder.record(5, 59, 5));
@@ -53,7 +53,7 @@ class DiffRecorderTest {
         Capture sink = new Capture();
         long claimed = BlockKey.pack(6, 65, 6);
         DiffRecorder recorder = new DiffRecorder(() -> ARENA,
-                (x, y, z) -> BlockKey.pack(x, y, z) == claimed, sink);
+                (worldId, x, y, z) -> BlockKey.pack(x, y, z) == claimed, sink);
 
         assertFalse(recorder.record(6, 65, 6), "domains restore their own terrain");
         assertTrue(recorder.record(5, 64, 5));
@@ -63,7 +63,7 @@ class DiffRecorderTest {
     @Test
     void aMissingActiveRegionDropsEverything() {
         Capture sink = new Capture();
-        DiffRecorder recorder = new DiffRecorder(() -> null, (x, y, z) -> false, sink);
+        DiffRecorder recorder = new DiffRecorder(() -> null, (worldId, x, y, z) -> false, sink);
 
         assertFalse(recorder.record(5, 64, 5));
         assertTrue(sink.seen.isEmpty());
@@ -73,7 +73,7 @@ class DiffRecorderTest {
     void readsTheBoundsSupplierOnEveryEventSoTaskEightCanSwapRegions() {
         Capture sink = new Capture();
         AtomicReference<DiffRecorder.Bounds> active = new AtomicReference<>(ARENA);
-        DiffRecorder recorder = new DiffRecorder(active::get, (x, y, z) -> false, sink);
+        DiffRecorder recorder = new DiffRecorder(active::get, (worldId, x, y, z) -> false, sink);
 
         assertTrue(recorder.record(5, 64, 5), "starts inside the arena");
         active.set((x, y, z) -> x >= 100 && x <= 110 && y == 64 && z == 0);
@@ -87,7 +87,7 @@ class DiffRecorderTest {
     void claimCheckReceivesRawCoordinatesNotPackedKeys() {
         AtomicReference<String> last = new AtomicReference<>();
         Capture sink = new Capture();
-        DiffRecorder recorder = new DiffRecorder(() -> ARENA, (x, y, z) -> {
+        DiffRecorder recorder = new DiffRecorder(() -> ARENA, (worldId, x, y, z) -> {
             last.set(x + "," + y + "," + z);
             return false;
         }, sink);

@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -67,10 +68,13 @@ public final class DiffRecorder implements Listener {
         boolean contains(int x, int y, int z);
     }
 
-    /** Domain claim query: true means the position belongs to a domain and is not ours to log. */
+    /**
+     * Domain claim query: true means the position belongs to a domain and is not ours to log.
+     * World identity is required because {@code DomainRegistry} keys claims per world (issue #33).
+     */
     @FunctionalInterface
     public interface ClaimCheck {
-        boolean claimed(int x, int y, int z);
+        boolean claimed(UUID worldId, int x, int y, int z);
     }
 
     private volatile Supplier<Bounds> bounds;
@@ -83,10 +87,10 @@ public final class DiffRecorder implements Listener {
         this.sink = Objects.requireNonNull(sink, "sink");
     }
 
-    /** Binds the domain registry's first-match-wins {@code ownerOf(int,int,int)} query. */
+    /** Binds the domain registry's world-aware ownership query. A null world fails open. */
     public static ClaimCheck domainClaims() {
         DomainRegistry registry = DomainRegistry.get();
-        return (x, y, z) -> registry.ownerOf(x, y, z) != null;
+        return (worldId, x, y, z) -> worldId != null && registry.ownerOf(worldId, x, y, z) != null;
     }
 
     /** Adapts a captured arena footprint to the injectable bounds type (no Bukkit calls). */
@@ -114,11 +118,16 @@ public final class DiffRecorder implements Listener {
     }
 
     /** @return true when the position was accepted and handed to the writer. */
-    public boolean record(int x, int y, int z) {
+    public boolean record(UUID worldId, int x, int y, int z) {
         Bounds active = activeBounds();
-        if (active == null || !tracked(active, x, y, z)) return false;
+        if (active == null || !tracked(active, worldId, x, y, z)) return false;
         sink.accept(Collections.singleton(BlockKey.pack(x, y, z)));
         return true;
+    }
+
+    /** Worldless compatibility overload for manual callers; a missing world fails open. */
+    public boolean record(int x, int y, int z) {
+        return record(null, x, y, z);
     }
 
     // ------------------------------------------------------------------ helpers
@@ -128,12 +137,12 @@ public final class DiffRecorder implements Listener {
         return supplier == null ? null : supplier.get();
     }
 
-    private boolean tracked(Bounds active, int x, int y, int z) {
-        return active.contains(x, y, z) && !claims.claimed(x, y, z);
+    private boolean tracked(Bounds active, UUID worldId, int x, int y, int z) {
+        return active.contains(x, y, z) && !claims.claimed(worldId, x, y, z);
     }
 
-    private void add(Bounds active, Set<Long> out, int x, int y, int z) {
-        if (tracked(active, x, y, z)) out.add(BlockKey.pack(x, y, z));
+    private void add(Bounds active, UUID worldId, Set<Long> out, int x, int y, int z) {
+        if (tracked(active, worldId, x, y, z)) out.add(BlockKey.pack(x, y, z));
     }
 
     private void emit(Set<Long> batch) {
@@ -141,7 +150,9 @@ public final class DiffRecorder implements Listener {
     }
 
     private void recordBlock(Block block) {
-        if (block != null) record(block.getX(), block.getY(), block.getZ());
+        if (block == null) return;
+        UUID worldId = block.getWorld() == null ? null : block.getWorld().getUID();
+        record(worldId, block.getX(), block.getY(), block.getZ());
     }
 
     private void recordBlocks(Collection<Block> blocks) {
@@ -149,7 +160,10 @@ public final class DiffRecorder implements Listener {
         Bounds active = activeBounds();
         if (active == null) return;
         Set<Long> batch = new HashSet<>(Math.max(16, blocks.size() * 2));
-        for (Block block : blocks) add(active, batch, block.getX(), block.getY(), block.getZ());
+        for (Block block : blocks) {
+            UUID worldId = block.getWorld() == null ? null : block.getWorld().getUID();
+            add(active, worldId, batch, block.getX(), block.getY(), block.getZ());
+        }
         emit(batch);
     }
 
@@ -158,7 +172,10 @@ public final class DiffRecorder implements Listener {
         Bounds active = activeBounds();
         if (active == null) return;
         Set<Long> batch = new HashSet<>(Math.max(16, states.size() * 2));
-        for (BlockState state : states) add(active, batch, state.getX(), state.getY(), state.getZ());
+        for (BlockState state : states) {
+            UUID worldId = state.getWorld() == null ? null : state.getWorld().getUID();
+            add(active, worldId, batch, state.getX(), state.getY(), state.getZ());
+        }
         emit(batch);
     }
 
@@ -176,16 +193,17 @@ public final class DiffRecorder implements Listener {
         int dy = face.getModY();
         int dz = face.getModZ();
         Block piston = event.getBlock();
+        UUID worldId = piston.getWorld() == null ? null : piston.getWorld().getUID();
         Set<Long> batch = new HashSet<>(Math.max(16, moved.size() * 3 + 4));
-        add(active, batch, piston.getX(), piston.getY(), piston.getZ());
-        add(active, batch, piston.getX() + dx, piston.getY() + dy, piston.getZ() + dz);
+        add(active, worldId, batch, piston.getX(), piston.getY(), piston.getZ());
+        add(active, worldId, batch, piston.getX() + dx, piston.getY() + dy, piston.getZ() + dz);
         for (Block block : moved) {
             int x = block.getX();
             int y = block.getY();
             int z = block.getZ();
-            add(active, batch, x, y, z);
-            add(active, batch, x + dx, y + dy, z + dz);
-            add(active, batch, x - dx, y - dy, z - dz);
+            add(active, worldId, batch, x, y, z);
+            add(active, worldId, batch, x + dx, y + dy, z + dz);
+            add(active, worldId, batch, x - dx, y - dy, z - dz);
         }
         emit(batch);
     }
@@ -213,8 +231,9 @@ public final class DiffRecorder implements Listener {
         Set<Long> batch = new HashSet<>(4);
         Block from = event.getBlock();
         Block to = event.getToBlock();
-        add(active, batch, from.getX(), from.getY(), from.getZ());
-        add(active, batch, to.getX(), to.getY(), to.getZ());
+        UUID worldId = from.getWorld() == null ? null : from.getWorld().getUID();
+        add(active, worldId, batch, from.getX(), from.getY(), from.getZ());
+        add(active, worldId, batch, to.getX(), to.getY(), to.getZ());
         emit(batch);
     }
 

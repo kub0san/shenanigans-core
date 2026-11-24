@@ -274,6 +274,9 @@ public final class ShenanigansCore extends JavaPlugin {
         if (children != null) {
             try {
                 permission.getChildren().putAll(children);
+                // Bukkit does not push child changes to already-registered Permissibles. Without
+                // this, players online across a reload keep the old effective permission set.
+                permission.recalculatePermissibles();
             } catch (UnsupportedOperationException e) {
                 instance.getLogger().warning("Could not attach children to permission " + node
                         + "; grant the leaf nodes directly if needed.");

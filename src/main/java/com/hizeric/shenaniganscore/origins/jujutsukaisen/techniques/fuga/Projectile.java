@@ -422,7 +422,7 @@ public class Projectile extends BukkitRunnable {
 
             double dmg = damagePerPower * power * falloff * mult;
             if (victim.equals(hitEntity)) dmg *= 1.25;
-            dmg = Math.max(1.0, dmg);
+            dmg = MathUtil.hitDamage(dmg, damagePerPower, 1.0);
 
             // Sure-hit through invulnerability frames, like the shrine's cleave.
             victim.setNoDamageTicks(0);

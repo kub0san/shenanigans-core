@@ -417,7 +417,7 @@ public class BlueProjectile extends BukkitRunnable {
             // The core crushes whatever reaches it.
             if (living && crush && dist <= coreRadius && !e.equals(caster)) {
                 LivingEntity victim = (LivingEntity) e;
-                double dmg = Math.max(1.0, damagePerPower * power);
+                double dmg = MathUtil.hitDamage(damagePerPower * power, damagePerPower, 1.0);
                 victim.setNoDamageTicks(0);
                 victim.damage(dmg, caster);
                 if (victim instanceof Player pl) {

@@ -128,8 +128,13 @@ public final class DomainRegistry {
 
     /** The session that owns this block, or {@code null}. */
     public UUID ownerOf(World world, int x, int y, int z) {
-        if (world == null) return null;
-        Map<Long, UUID> worldMap = ownersByWorld.get(world.getUID());
+        return world == null ? null : ownerOf(world.getUID(), x, y, z);
+    }
+
+    /** The session that owns this block in the given world, or {@code null}. */
+    public UUID ownerOf(UUID worldId, int x, int y, int z) {
+        if (worldId == null) return null;
+        Map<Long, UUID> worldMap = ownersByWorld.get(worldId);
         if (worldMap == null) return null;
         return worldMap.get(pack(x, y, z));
     }

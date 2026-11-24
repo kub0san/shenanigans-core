@@ -397,7 +397,8 @@ public class PiercingBloodShot extends BukkitRunnable {
             LivingEntity victim = hits.get(i).entity();
             if (!victim.isValid() || victim.isDead()) continue;
 
-            double dmg = Math.max(1.0, damagePerPower * power * Math.pow(pierceFalloff, i));
+            double dmg = MathUtil.hitDamage(
+                    damagePerPower * power * Math.pow(pierceFalloff, i), damagePerPower, 1.0);
 
             // Sure-hit through invulnerability frames.
             victim.setNoDamageTicks(0);
