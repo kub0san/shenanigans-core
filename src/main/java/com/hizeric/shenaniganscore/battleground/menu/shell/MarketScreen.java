@@ -23,7 +23,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
-import java.util.Map;
 import com.hizeric.shenaniganscore.battleground.menu.base.screen.ScreenRegistry;
 
 /** Market: category tabs, a grid of cards, and live ownership/streak state. */
@@ -129,22 +128,6 @@ public final class MarketScreen extends GuiScreen {
         return null;
     }
 
-    private boolean fits(ItemStack stack) {
-        // addItem() uses all 41 slots, including the hotbar — the pre-check must see them too.
-        return fits(stack, player.getInventory().getContents());
-    }
-
-    /** Pure seam: a purchase fits when any slot is empty or can stack the item. */
-    static boolean fits(ItemStack stack, ItemStack[] contents) {
-        if (stack == null || contents == null) return false;
-        for (ItemStack slot : contents) {
-            if (slot == null || slot.getType().isAir()) return true;
-            if (slot.getMaxStackSize() > 1 && stack.getMaxStackSize() > 1
-                    && slot.isSimilar(stack) && slot.getAmount() < slot.getMaxStackSize()) return true;
-        }
-        return false;
-    }
-
     private void buy(MarketView.Row rendered) {
         ShopEntry entry = fresh(rendered.entry().id());
         if (entry == null || !entry.enabled()) {
@@ -171,10 +154,6 @@ public final class MarketScreen extends GuiScreen {
             fail("That entry is misconfigured — notify an admin.");
             return;
         }
-        if (toGrant != null && !fits(toGrant)) {
-            fail("No room in your inventory — free a slot first.");
-            return;
-        }
 
         int price = Math.max(0, entry.price());
         BattlegroundPlayer.PurchaseResult result =
@@ -189,18 +168,13 @@ public final class MarketScreen extends GuiScreen {
             return;
         }
 
+        if (MarketDelivery.requiresInventoryMutation(entry.isCustomItem(), toGrant != null, false, result)) {
+            fail("Staged purchases must not mutate inventory.");
+            return;
+        }
+
         if (toGrant != null) {
-            Map<Integer, ItemStack> leftovers = player.getInventory().addItem(toGrant.clone());
-            if (!leftovers.isEmpty()) {
-                // Delivery failed after the charge — refund and revoke ownership, otherwise the
-                // free Loadout → Items equip path would hand out the item with no payment.
-                data.revokeEntry(entry.id());
-                data.addCredits(price);
-                plugin.getBattlegroundManager().playerStore().markDirty(player.getUniqueId());
-                fail("Could not deliver the item — credits refunded.");
-                return;
-            }
-            // Persist the purchased item so it survives the next deploy.
+            // Stage the purchased item in layout data so it survives the next deploy.
             LoadoutCodec.DecodeResult dec = LoadoutCodec.decode(data.layoutData(), GlobalKit.kit());
             data.setLayoutData(LoadoutCodec.encode(
                     LoadoutSwap.equipSword(dec.items(), toGrant.clone())).data());
