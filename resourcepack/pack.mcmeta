@@ -8,16 +8,6 @@
     "max_format": [
       999,
       0
-    ],
-    "supported_formats": {
-      "min_inclusive": [
-        75,
-        0
-      ],
-      "max_inclusive": [
-        999,
-        0
-      ]
-    }
+    ]
   }
 }
