@@ -168,6 +168,9 @@ public final class PlayerStore {
                 .thenRunAsync(() -> writeSafely(record), ioExecutor);
         writeTails.put(record.uuid(), next);
         next.whenComplete((ok, err) -> {
+            // Drop the settled tail so the map stays bounded and a failed future can
+            // never become the permanent head of a player's write chain (#27/#60).
+            writeTails.remove(record.uuid(), next);
             if (err != null) dirty.add(record.uuid());
         });
     }
@@ -175,7 +178,10 @@ public final class PlayerStore {
     private void writeSafely(PlayerRecord record) {
         try {
             repository.upsert(record);
-        } catch (StorageException e) {
+        } catch (Throwable e) {
+            // Catch every failure, not just StorageException: any unchecked throw
+            // escaping here would complete the chain exceptionally and permanently
+            // poison all later writes for this player (#60).
             warn("Could not save " + record.uuid(), e);
             dirty.add(record.uuid());
         }
