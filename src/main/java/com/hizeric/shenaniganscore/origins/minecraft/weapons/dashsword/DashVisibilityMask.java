@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -42,14 +43,22 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class DashVisibilityMask {
 
-    /** Six empty slots; a shared immutable list is safe because the wrapper only reads it. */
-    private static final List<Equipment> EMPTY_EQUIPMENT = List.of(
-            new Equipment(EquipmentSlot.MAIN_HAND, ItemStack.EMPTY),
-            new Equipment(EquipmentSlot.OFF_HAND, ItemStack.EMPTY),
-            new Equipment(EquipmentSlot.BOOTS, ItemStack.EMPTY),
-            new Equipment(EquipmentSlot.LEGGINGS, ItemStack.EMPTY),
-            new Equipment(EquipmentSlot.CHEST_PLATE, ItemStack.EMPTY),
-            new Equipment(EquipmentSlot.HELMET, ItemStack.EMPTY));
+    /**
+     * Six empty slots; a shared immutable list is safe because the wrapper only reads it.
+     *
+     * <p>Built on first use rather than at class load: {@code ItemStack.EMPTY} requires the live
+     * plugin-owned PacketEvents singleton, and the pure viewer policy below must stay testable
+     * without one.</p>
+     */
+    private static final class EmptyEquipment {
+        private static final List<Equipment> SLOTS = List.of(
+                new Equipment(EquipmentSlot.MAIN_HAND, ItemStack.EMPTY),
+                new Equipment(EquipmentSlot.OFF_HAND, ItemStack.EMPTY),
+                new Equipment(EquipmentSlot.BOOTS, ItemStack.EMPTY),
+                new Equipment(EquipmentSlot.LEGGINGS, ItemStack.EMPTY),
+                new Equipment(EquipmentSlot.CHEST_PLATE, ItemStack.EMPTY),
+                new Equipment(EquipmentSlot.HELMET, ItemStack.EMPTY));
+    }
 
     private static final Set<DashVisibilityMask> ACTIVE = ConcurrentHashMap.newKeySet();
 
@@ -89,6 +98,18 @@ public final class DashVisibilityMask {
         return original;
     }
 
+    /**
+     * Pure viewer policy for the packet mask: third parties must see the empty equipment packet,
+     * while the caster keeps their own first-person equipment. Non-player viewers and packets for
+     * other entities are never masked.
+     */
+    static boolean shouldMaskViewer(UUID casterUuid, int maskedEntityId, int packetEntityId,
+                                    Object viewer) {
+        if (viewer == null || !(viewer instanceof Player player)) return false;
+        if (packetEntityId != maskedEntityId) return false;
+        return !player.getUniqueId().equals(casterUuid);
+    }
+
     /** Intercept every authoritative equipment update for this caster while the dash is live. */
     private void registerEquipmentListener() {
         if (closed || player == null || entityId < 0 || !PacketEventsBridge.isReady()) return;
@@ -105,12 +126,13 @@ public final class DashVisibilityMask {
                 }
                 if (incoming.getEntityId() != entityId) return;
                 Object viewer = event.getPlayer();
-                if (viewer == null) return;
+                if (!shouldMaskViewer(player.getUniqueId(), entityId,
+                        incoming.getEntityId(), viewer)) return;
                 event.setCancelled(true);
                 try {
                     // Silent send bypasses this listener; a regular send would be re-cancelled.
                     PacketEvents.getAPI().getPlayerManager().sendPacketSilently(
-                            viewer, new WrapperPlayServerEntityEquipment(entityId, EMPTY_EQUIPMENT));
+                            viewer, new WrapperPlayServerEntityEquipment(entityId, EmptyEquipment.SLOTS));
                 } catch (Throwable t) {
                     log("Failed to mask dash equipment packet", t);
                 }
