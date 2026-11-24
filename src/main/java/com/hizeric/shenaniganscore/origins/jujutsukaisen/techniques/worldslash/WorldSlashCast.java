@@ -4,6 +4,8 @@ import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
 import com.hizeric.shenaniganscore.core.session.DomainSession;
 import com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.malevolentshrine.Session;
+import com.hizeric.shenaniganscore.origins.jujutsukaisen.techniques.WindupSlowness;
+import com.hizeric.shenaniganscore.origins.jujutsukaisen.techniques.WindupSlownessCleanup;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
@@ -17,8 +19,6 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.BoundingBox;
 import org.bukkit.util.RayTraceResult;
@@ -175,6 +175,8 @@ public class WorldSlashCast extends BukkitRunnable {
 
     // ── Cast state ──
     private final Player caster;
+    /** Owns the chant's root so death/logout cancels cannot leave the caster slowed (issue #37). */
+    private final WindupSlowness windupSlowness = new WindupSlowness();
     private final boolean grid;
     private final boolean horizontal;
     private final boolean armorPiercing;
@@ -239,6 +241,7 @@ public class WorldSlashCast extends BukkitRunnable {
             step();
         } catch (Throwable t) {
             ShenanigansCore.getInstance().getLogger().warning("World Cutting Slash failed, cleaning up: " + t);
+            clearWindupSlowness();
             WorldSlashBuilder.cleanup(this);
             cancel();
         }
@@ -250,6 +253,7 @@ public class WorldSlashCast extends BukkitRunnable {
 
         // A caster who logs off or dies during the chant cancels the cut.
         if (state == State.CHANT && (!caster.isOnline() || caster.isDead())) {
+            clearWindupSlowness();
             WorldSlashBuilder.cleanup(this);
             cancel();
             return;
@@ -288,6 +292,7 @@ public class WorldSlashCast extends BukkitRunnable {
                 if (stateTicks >= CLOSE_TICKS) enter(State.DONE);
             }
             case DONE -> {
+                clearWindupSlowness();
                 WorldSlashBuilder.cleanup(this);
                 cancel();
             }
@@ -309,9 +314,14 @@ public class WorldSlashCast extends BukkitRunnable {
         shrine = findShrine(caster);
         enhanced = shrine != null;
         WorldSlashBuilder.spawnChant(this);
-        // He stands still while the Binding Vow is spoken.
-        caster.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS,
-                CHANT_TICKS + 4, 4, false, false, true));
+        // He stands still while the Binding Vow is spoken. The shared helper owns the root and
+        // restores any pre-existing SLOWNESS on every exit path, including a death/logout cancel.
+        WindupSlownessCleanup.grant(caster, windupSlowness, CHANT_TICKS + 4, 4);
+    }
+
+    /** Removes the chant root only if this cast still owns it (never a stranger's SLOWNESS). */
+    private void clearWindupSlowness() {
+        WindupSlownessCleanup.clear(caster, windupSlowness);
     }
 
     // ------------------------------------------------------------------

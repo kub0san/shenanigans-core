@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -24,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.logging.Level;
 
 public final class PlayerStore {
@@ -33,6 +35,9 @@ public final class PlayerStore {
     private final JavaPlugin plugin;
     private final File folder;
     private final PlayerRepository repository;
+    /** Single-flight ownership of an in-progress load, so concurrent preloads read SQL once. */
+    private final Function<UUID, Optional<PlayerRecord>> loader;
+    private final Map<UUID, CompletableFuture<BattlegroundPlayer>> loads = new ConcurrentHashMap<>();
     private final Map<UUID, BattlegroundPlayer> cache = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<Void>> writeTails = new ConcurrentHashMap<>();
     private final Set<UUID> dirty = ConcurrentHashMap.newKeySet();
@@ -45,15 +50,26 @@ public final class PlayerStore {
     }
 
     public PlayerStore(JavaPlugin plugin, File battlegroundFolder, Database database) {
-        this.plugin = plugin;
-        this.folder = battlegroundFolder;
-        this.repository = new PlayerRepository(database);
-        this.ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        this(plugin, battlegroundFolder, new PlayerRepository(database), null);
     }
 
     /** Explicit injection for callers/tests that own the database lifecycle (new API). */
     public PlayerStore(JavaPlugin plugin, Database database) {
         this(plugin, null, database);
+    }
+
+    /** Test seam: replaces only the record loader, leaving write/flush behaviour intact. */
+    PlayerStore(JavaPlugin plugin, Database database, Function<UUID, Optional<PlayerRecord>> loader) {
+        this(plugin, null, new PlayerRepository(database), loader);
+    }
+
+    private PlayerStore(JavaPlugin plugin, File battlegroundFolder, PlayerRepository repository,
+                         Function<UUID, Optional<PlayerRecord>> loader) {
+        this.plugin = plugin;
+        this.folder = battlegroundFolder;
+        this.repository = repository;
+        this.loader = loader == null ? repository::load : loader;
+        this.ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     public void enable() {
@@ -91,8 +107,16 @@ public final class PlayerStore {
             BattlegroundPlayer player = cache.get(uuid);
             if (player != null) writeSafely(snapshot(player));
         }
+        // A read finishing after cache.clear() could re-populate the cache past disable (review L2).
+        try {
+            CompletableFuture.allOf(loads.values().toArray(CompletableFuture[]::new))
+                    .get(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            warn("Timed out waiting for in-flight player preloads", e);
+        }
         dirty.clear();
         writeTails.clear();
+        loads.clear();
         try { ioExecutor.shutdown(); } catch (Throwable ignored) { }
         cache.clear();
     }
@@ -101,13 +125,42 @@ public final class PlayerStore {
 
     public void preload(UUID uuid) {
         if (uuid == null || cache.containsKey(uuid)) return;
-        BattlegroundPlayer player = new BattlegroundPlayer(uuid);
+        // Issue #41: one repository read per UUID, owned by a single future. Every caller waits for
+        // that future before returning, so no thread can publish a second (possibly older) record.
+        CompletableFuture<BattlegroundPlayer> future = loads.computeIfAbsent(uuid, id -> {
+            // A caller can pass the cache check above, then find the owner already finished and
+            // removed its future. Re-check here so that race never starts a second read.
+            BattlegroundPlayer cached = cache.get(id);
+            if (cached != null) return CompletableFuture.completedFuture(cached);
+            CompletableFuture<BattlegroundPlayer> created = new CompletableFuture<>();
+            Runnable read = () -> {
+                BattlegroundPlayer player = new BattlegroundPlayer(id);
+                try {
+                    loader.apply(id).ifPresent(record -> applySafely(player, record));
+                } catch (StorageException e) {
+                    warn("Could not preload data for " + id, e);
+                } finally {
+                    cache.putIfAbsent(id, player);
+                    created.complete(player);
+                    // In the plugin the read runs off the mapping thread, so this removal is safe.
+                    // In the synchronous no-plugin path it would be a recursive CHM update; those
+                    // entries are cleared in disable() instead.
+                    if (plugin != null) loads.remove(id, created);
+                }
+            };
+            // With no plugin (unit tests) keep the historical synchronous behaviour; in the plugin
+            // the read runs on the IO executor and callers wait on the future below.
+            if (plugin == null) read.run();
+            else ioExecutor.execute(read);
+            return created;
+        });
         try {
-            repository.load(uuid).ifPresent(record -> applySafely(player, record));
-        } catch (StorageException e) {
-            warn("Could not preload data for " + uuid, e);
+            future.get(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            warn("Timed out waiting for preload of " + uuid, e);
         }
-        cache.put(uuid, player);
     }
 
     public void preloadOnline() {

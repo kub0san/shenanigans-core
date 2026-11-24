@@ -11,9 +11,11 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
 
@@ -29,6 +31,9 @@ public final class ClientBlockUtils {
 
     /** Maximum updates included in one call to the transport. */
     private static final int MAX_UPDATES_PER_BATCH = 128;
+
+    /** Bound for the synchronous shutdown flush, so disable cannot stall on a huge overlay. */
+    private static final int SHUTDOWN_REVERT_LIMIT = 16 * MAX_UPDATES_PER_BATCH;
 
     /** Global work limits per server tick. */
     private static final int BLOCKS_PER_TICK = 1_500;
@@ -180,6 +185,52 @@ public final class ClientBlockUtils {
         if (drainTask != null) {
             drainTask.cancel();
             drainTask = null;
+        }
+        // Issue #57: the scheduler no-ops while the plugin disables, so a queued revert would never
+        // reach the client and fake AIR would linger after a reload. Flush every tracked overlay and
+        // queued update synchronously (reading the current real block data) before dropping state.
+        Map<UUID, Set<BlockKey>> tracked = new HashMap<>();
+        for (Map.Entry<UUID, PlayerQueue> pending : PENDING.entrySet()) {
+            tracked.computeIfAbsent(pending.getKey(), ignored -> new HashSet<>())
+                    .addAll(pending.getValue().updates.keySet());
+        }
+        for (Map.Entry<UUID, Map<BlockKey, BlockData>> overlay : OVERLAYS.entrySet()) {
+            tracked.computeIfAbsent(overlay.getKey(), ignored -> new HashSet<>())
+                    .addAll(overlay.getValue().keySet());
+        }
+        for (Map.Entry<UUID, Set<BlockKey>> playerKeys : tracked.entrySet()) {
+            Player player = Bukkit.getPlayer(playerKeys.getKey());
+            if (player == null || !player.isOnline()) continue;
+            Map<Location, BlockData> changes = new HashMap<>();
+            boolean truncated = false;
+            for (BlockKey key : playerKeys.getValue()) {
+                if (changes.size() >= SHUTDOWN_REVERT_LIMIT) {
+                    truncated = true;
+                    break;
+                }
+                World world = Bukkit.getWorld(key.worldId());
+                if (world == null || !isValidTarget(player.getWorld(), key)
+                        || !world.isChunkLoaded(key.x() >> 4, key.z() >> 4)) continue;
+                changes.put(new Location(world, key.x(), key.y(), key.z()),
+                        world.getBlockAt(key.x(), key.y(), key.z()).getBlockData().clone());
+            }
+            if (changes.isEmpty()) continue;
+            try {
+                transport.send(player, changes);
+                ShenanigansCore plugin = ShenanigansCore.getInstance();
+                if (plugin != null && truncated) {
+                    plugin.getLogger().warning("Only the first " + SHUTDOWN_REVERT_LIMIT
+                            + " client-block overlays were reverted for " + player.getName()
+                            + " at shutdown; remaining fake blocks expire on rejoin.");
+                }
+            } catch (RuntimeException exception) {
+                ShenanigansCore plugin = ShenanigansCore.getInstance();
+                if (plugin != null) {
+                    plugin.getLogger().log(Level.WARNING,
+                            "Failed to flush client-block overlays for " + player.getName()
+                                    + " at shutdown", exception);
+                }
+            }
         }
         PENDING.clear();
         ROUND_ROBIN.clear();

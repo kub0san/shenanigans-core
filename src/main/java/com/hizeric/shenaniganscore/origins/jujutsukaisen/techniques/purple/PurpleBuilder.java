@@ -1042,7 +1042,10 @@ public final class PurpleBuilder {
             final Set<UUID> viewers = new HashSet<>(rig.viewers);
             rig.erasedLocs.clear();
             try {
-                ShenanigansCore.runTaskLater( () -> TechniqueEraseOps.restore(locs, viewers), p.eraseTicks());
+                var task = ShenanigansCore.runTaskLater(
+                        () -> TechniqueEraseOps.restore(locs, viewers), p.eraseTicks());
+                // During disable the scheduler helper returns null instead of throwing (issue #57).
+                if (task == null) TechniqueEraseOps.restore(locs, viewers);
             } catch (Throwable t) {
                 // Plugin is shutting down: restore immediately.
                 TechniqueEraseOps.restore(locs, viewers);

@@ -3,6 +3,7 @@ package com.hizeric.shenaniganscore.listeners;
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.session.SessionEndReason;
 import com.hizeric.shenaniganscore.core.util.ClientBlockUtils;
+import com.hizeric.shenaniganscore.origins.jujutsukaisen.techniques.WindupSlownessCleanup;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashVisibilityMask;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -36,6 +37,9 @@ public class LifecycleListener implements Listener {
         // Drop any client-side block overlays bound to the quitter so stale fake blocks and
         // per-player queue state cannot leak across reconnect (F-16, F-48). Quit fires on main.
         ClientBlockUtils.clearPlayer(caster);
+        // Issue #37: drop the last-grant-wins windup owner so the map cannot accumulate a stale
+        // entry for every UUID that ever cast on a long-lived server.
+        WindupSlownessCleanup.forget(caster.getUniqueId());
         endIfActive(caster, SessionEndReason.NORMAL);
     }
 

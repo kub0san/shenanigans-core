@@ -812,8 +812,10 @@ public final class WorldSlashBuilder {
             final Set<UUID> viewers = new HashSet<>(rig.viewers);
             rig.erasedLocs.clear();
             try {
-                ShenanigansCore.runTaskLater(
+                var task = ShenanigansCore.runTaskLater(
                         () -> TechniqueEraseOps.restore(locs, viewers), WorldSlashCast.SLIT_RESTORE_TICKS);
+                // During disable the scheduler helper returns null instead of throwing (issue #57).
+                if (task == null) TechniqueEraseOps.restore(locs, viewers);
             } catch (Throwable t) {
                 TechniqueEraseOps.restore(locs, viewers);
             }
