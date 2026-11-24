@@ -11,6 +11,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -157,18 +158,29 @@ public final class SetupSession {
         phase = Phase.CANCELLED;
     }
 
-    /** FAWE/WorldEdit register "wand" as a subcommand, not a label — try label+argument forms first. */
+    interface WandDispatcher {
+        boolean dispatch(Player sender, String command);
+    }
+
+    /** Canonical slash command first, then namespaced and bare labels. */
+    static List<String> wandCandidates() {
+        return List.of("//wand", "worldedit:wand", "fawe:wand", "wand");
+    }
+
     private static boolean dispatchWand(Player player) {
-        String[] commands = {"worldedit wand", "// wand", "worldedit:wand", "fawe:wand", "wand", "//wand"};
+        return dispatchWand(player, Bukkit::dispatchCommand);
+    }
+
+    static boolean dispatchWand(Player player, WandDispatcher dispatcher) {
         boolean loggedFirst = false;
-        for (String command : commands) {
+        for (String command : wandCandidates()) {
             try {
-                if (Bukkit.dispatchCommand(player, command)) return true;
+                if (dispatcher.dispatch(player, command)) return true;
             } catch (RuntimeException e) {
                 // CommandException (unknown spelling) is a RuntimeException; log the first
                 // failure at FINE and keep trying. Errors (OOM, LinkageError, …) propagate.
                 if (!loggedFirst) {
-                    Bukkit.getLogger().log(Level.FINE, "wand dispatch failed for spelling: " + command, e);
+                    Bukkit.getLogger().log(Level.FINE, "wand dispatch failed for candidate spelling: " + command, e);
                     loggedFirst = true;
                 }
             }
