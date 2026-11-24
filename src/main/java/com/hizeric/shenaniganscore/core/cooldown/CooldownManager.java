@@ -184,11 +184,31 @@ public class CooldownManager {
     /** Sweeps finished entries so the maps stay small across long uptimes. */
     public void clearExpired() {
         long now = System.currentTimeMillis();
-        cooldowns.values().removeIf(endsAt -> endsAt <= now);
-        keyedCooldowns.values().removeIf(bucket -> {
-            bucket.values().removeIf(endsAt -> endsAt <= now);
-            return bucket.isEmpty();
-        });
+        for (java.util.UUID uuid : new java.util.ArrayList<>(cooldowns.keySet())) {
+            Long endsAt = cooldowns.get(uuid);
+            if (endsAt != null && endsAt <= now) {
+                cooldowns.remove(uuid, endsAt);
+                cooldownTotals.remove(uuid);
+            }
+        }
+        for (java.util.Map.Entry<String, java.util.Map<java.util.UUID, Long>> entry
+                : new java.util.ArrayList<>(keyedCooldowns.entrySet())) {
+            java.util.Map<java.util.UUID, Long> bucket = entry.getValue();
+            java.util.Map<java.util.UUID, Integer> totals = keyedCooldownTotals.get(entry.getKey());
+            for (java.util.UUID uuid : new java.util.ArrayList<>(bucket.keySet())) {
+                Long endsAt = bucket.get(uuid);
+                if (endsAt != null && endsAt <= now) {
+                    bucket.remove(uuid, endsAt);
+                    if (totals != null) totals.remove(uuid);
+                }
+            }
+            if (bucket.isEmpty()) {
+                keyedCooldowns.remove(entry.getKey(), bucket);
+                if (totals != null && totals.isEmpty()) {
+                    keyedCooldownTotals.remove(entry.getKey(), totals);
+                }
+            }
+        }
     }
 
     /** Number of distinct cooldown keys currently tracked (diagnostics). */

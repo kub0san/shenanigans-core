@@ -55,6 +55,10 @@ public final class AbilityCaster {
             return CastResult.UNKNOWN_ABILITY;
         }
 
+        UUID uuid = player.getUniqueId();
+        String cooldownKey = id.toString();
+        int cooldownSeconds = definition.cooldownSeconds();
+        boolean cooldownClaimed = false;
         if (source != CastSource.DEBUG) {
             for (Gate gate : gates) {
                 CastResult result = gate.check(player, definition, source);
@@ -69,9 +73,6 @@ public final class AbilityCaster {
                 return CastResult.DOMAIN_LOCKED;
             }
 
-            UUID uuid = player.getUniqueId();
-            String cooldownKey = id.toString();
-            int cooldownSeconds = definition.cooldownSeconds();
             // Atomically check-and-claim (F-22): the cooldown is reserved before the
             // origin performs, so two concurrent casts cannot both pass the gate.
             if (!cooldowns.tryClaim(uuid, cooldownKey, cooldownSeconds)) {
@@ -79,9 +80,17 @@ public final class AbilityCaster {
                         + "<gray>Ready in <white>" + cooldowns.getRemainingSeconds(uuid, cooldownKey) + "s");
                 return CastResult.COOLDOWN;
             }
+            cooldownClaimed = cooldownSeconds > 0;
         }
 
-        definition.perform(player);
+        try {
+            definition.perform(player);
+        } catch (Throwable t) {
+            // Release the claimed cooldown so a failed cast does not lock the player
+            // out for the full configured duration (audit #25).
+            if (cooldownClaimed) cooldowns.clear(uuid, cooldownKey);
+            throw t;
+        }
         if (source != CastSource.DEBUG) TechniqueFx.burst(player, id);
         return CastResult.OK;
     }
