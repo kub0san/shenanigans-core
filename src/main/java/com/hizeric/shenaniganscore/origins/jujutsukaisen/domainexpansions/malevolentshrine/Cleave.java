@@ -163,14 +163,15 @@ public final class Cleave {
         // Creative addition: Directional Impact Vector (Pushing blood away from the mouth)
         Vector impactDir = mouth.toVector().subtract(entity.getLocation().toVector()).normalize().multiply(-1);
         
-        Slashes.lash(mouth, hitChest, 0.075f);
+        Slashes.lash(session.slashDisplays, mouth, hitChest, 0.075f);
         // Opening: one long, mostly horizontal cut (sparse), then the spaced ravage.
         float opening = 9.0f + lvl * 0.8f + r.nextFloat(0f, 3.0f);
-        Slashes.cross(hitCenter, opening);
+        Slashes.cross(session.slashDisplays, hitCenter, opening);
         if (r.nextInt(4) == 0) {
-            Slashes.rake(hitCenter, r.nextFloat(0f, 360f), (r.nextFloat() - 0.5f) * 18f, 7.0f + r.nextFloat(0f, 2.5f));
+            Slashes.rake(session.slashDisplays, hitCenter, r.nextFloat(0f, 360f),
+                    (r.nextFloat() - 0.5f) * 18f, 7.0f + r.nextFloat(0f, 2.5f));
         }
-        Slashes.ravage(mouth, hitChest, lvl, delayMs);
+        Slashes.ravage(session, session.slashDisplays, mouth, hitChest, lvl, delayMs);
 
         // Immediate blood burst with physics directionality
         world.spawnParticle(Particle.SWEEP_ATTACK, hitCenter, 1, 0.1, 0.1, 0.1, 0);
@@ -243,7 +244,7 @@ public final class Cleave {
                     || p.getGameMode() == GameMode.SPECTATOR)) return;
 
             Location chest = entity.getLocation().add(0, 0.85 + ThreadLocalRandom.current().nextDouble() * 0.6, 0);
-            Slashes.microCut(chest);
+            Slashes.microCut(session.slashDisplays, chest);
             world.playSound(chest, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.55f, 0.95f + ThreadLocalRandom.current().nextFloat() * 0.4f);
         });
     }

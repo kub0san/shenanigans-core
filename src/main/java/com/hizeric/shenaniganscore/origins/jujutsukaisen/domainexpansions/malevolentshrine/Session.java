@@ -105,6 +105,8 @@ public class Session extends DomainSession {
     public final Set<UUID> warned = new HashSet<>();
     /** Cleave escalation per victim (RAVAGE level). Cleared on close. */
     public final Map<UUID, Integer> ravageCounts = new ConcurrentHashMap<>();
+    /** Slash displays spawned for this domain; disposed on every close path. */
+    public final SlashDisplayRegistry slashDisplays = new SlashDisplayRegistry();
     /** Enemy projectiles/TNT stalked by Dismantle before the delayed final cut. */
     public final Map<UUID, Dismantle.TrackedCut> trackedProjectileCuts = new ConcurrentHashMap<>();
 
@@ -896,7 +898,7 @@ public class Session extends DomainSession {
                     (rnd.nextDouble() - 0.5) * 10.0,
                     0.8 + rnd.nextDouble() * 1.4,
                     (rnd.nextDouble() - 0.5) * 10.0);
-            Slashes.flurry(around, 1, 10.0 + rnd.nextDouble() * 4.0);
+            Slashes.flurry(slashDisplays, around, 1, 10.0 + rnd.nextDouble() * 4.0);
         }
     }
 
@@ -1070,6 +1072,10 @@ public class Session extends DomainSession {
             if (p != null && p.isOnline()) OpenBarrier.resetSky(p);
         }
         skyPlayers.clear();
+
+        // Slashes self-remove, but delayed RAVAGE stages can still be in flight
+        // when a forced close/shatter ends the domain: drop every owned display.
+        slashDisplays.dispose();
 
         // Remove every display entity
         for (Entity e : spawnedDisplays) {

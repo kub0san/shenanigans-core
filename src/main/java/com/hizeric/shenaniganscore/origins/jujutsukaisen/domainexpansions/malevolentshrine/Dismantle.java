@@ -116,10 +116,10 @@ public final class Dismantle {
     public static void pulse(Session session, Player caster) {
         for (Player p : playersInside(session, caster)) {
             shredArmor(p, shredFraction());
-            breakShield(p);
+            breakShield(p, session.slashDisplays);
 
             Location chest = p.getLocation().add(0, 1.0, 0);
-            Slashes.flurry(chest, 1, 3.2);
+            Slashes.flurry(session.slashDisplays, chest, 1, 3.2);
 
             if (session.warned.add(p.getUniqueId())) {
                 p.sendMessage(MiniMessage.miniMessage().deserialize(
@@ -188,12 +188,12 @@ public final class Dismantle {
             }
 
             Location loc = e.getLocation();
-            spawnMiniSlashes(loc, tc, now);
+            spawnMiniSlashes(session.slashDisplays, loc, tc, now);
 
             // Cut after the telegraphed delay, but always before the projectile can hit a block
             // (so things like ender pearls never get to teleport/trigger their impact).
             if (now >= tc.cutAtMs || isAboutToHitBlock(e)) {
-                cut(e);
+                cut(session.slashDisplays, e);
                 it.remove();
             }
         }
@@ -256,7 +256,7 @@ public final class Dismantle {
         return false;
     }
 
-    private static void spawnMiniSlashes(Location loc, TrackedCut tc, long now) {
+    private static void spawnMiniSlashes(SlashDisplayRegistry owner, Location loc, TrackedCut tc, long now) {
         World w = loc.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -273,7 +273,7 @@ public final class Dismantle {
             float yaw = r.nextFloat() * 360f;
             float pitch = (r.nextFloat() - 0.5f) * 50f;
             float len = 1.8f + r.nextFloat() * 1.6f;
-            Slashes.blade(around, len, yaw, pitch, 0.028f + r.nextFloat() * 0.015f, 5);
+            Slashes.blade(owner, around, len, yaw, pitch, 0.028f + r.nextFloat() * 0.015f, 5);
         }
         if (r.nextInt(3) == 0) {
             w.playSound(loc, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.35f, 1.3f + r.nextFloat() * 0.5f);
@@ -281,7 +281,7 @@ public final class Dismantle {
     }
 
     /** Final delayed cut: a real shrine slash entity tears through the projectile. */
-    private static void cut(Entity e) {
+    private static void cut(SlashDisplayRegistry owner, Entity e) {
         Location loc = e.getLocation();
         Vector travel = e.getVelocity();
         e.remove();
@@ -293,7 +293,7 @@ public final class Dismantle {
         Vector tipVec = loc.clone().toVector().add(dir).multiply(len);
         Location tip = new Location(loc.getWorld(),
                 tipVec.getX(), tipVec.getY(), tipVec.getZ());
-        Slashes.lash(loc, tip, 0.075f);
+        Slashes.lash(owner, loc, tip, 0.075f);
         w.playSound(loc, Sound.ENTITY_PLAYER_ATTACK_SWEEP, 0.9f, 1.15f);
     }
 
@@ -329,12 +329,12 @@ public final class Dismantle {
         }
     }
 
-    static void breakShield(Player p) {
+    static void breakShield(Player p, SlashDisplayRegistry owner) {
         if (!p.isBlocking()) return;
         p.clearActiveItem();
         p.setCooldown(Material.SHIELD, shieldCooldownTicks());
         p.getWorld().playSound(p.getLocation(), Sound.ITEM_SHIELD_BREAK, 1.0f, 0.8f);
-        Slashes.cross(p.getLocation().add(0, 1.2, 0), 2.6f);
+        Slashes.cross(owner, p.getLocation().add(0, 1.2, 0), 2.6f);
     }
 
     private static List<Player> playersInside(Session session, Player caster) {
@@ -549,8 +549,8 @@ public final class Dismantle {
 
                 hit.add(p.getUniqueId());
                 shredArmor(p, waveShredFraction());
-                breakShield(p);
-                Slashes.cross(p.getLocation().add(0, 1.0, 0), 5.5f);
+                breakShield(p, session.slashDisplays);
+                Slashes.cross(session.slashDisplays, p.getLocation().add(0, 1.0, 0), 5.5f);
                 w.playSound(p.getLocation(), Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.4f, 0.75f);
                 w.playSound(p.getLocation(), Sound.BLOCK_ANVIL_BREAK, 0.8f, 0.9f);
                 w.spawnParticle(Particle.CRIT, p.getLocation().add(0, 1.2, 0), 14, 0.4, 0.6, 0.4, 0.18);
