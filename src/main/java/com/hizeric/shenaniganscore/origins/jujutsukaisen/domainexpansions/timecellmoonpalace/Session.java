@@ -39,15 +39,15 @@ import com.hizeric.shenaniganscore.core.util.MathUtil;
  * Time Cell Moon Palace timeline.
  *
  * <pre>
- *  SIGN       1.5s  the title types itself in, glitching; the projector spools up; film spirals
- *  EXPANSION  3.0s  the terrain blackens outward in whole frames (the floor lead-in), then the
- *                   shell rises from the bottom pole to the crown; the sky drains to midnight;
+ *  SIGN       1.0s  the title types itself in, glitching; the projector spools up; film spirals
+ *  EXPANSION  6.0s  the terrain blackens outward (the floor lead-in), then the shell rises
+ *                   continuously from the studio floor to the crown; the sky drains to midnight;
  *                   film ribbons unroll from above; the flesh path unfurls toward the eye;
  *                   the lid cracks into a slit of light and parts
  *  DOMAIN    16.0s  CUT TO BLACK. A scan line sweeps from the eye across the arena and injects
  *                   film into every neck as it passes. The projector beam flickers down the
  *                   path, the flesh beats, ribbons run, the 24 FPS rule is enforced
- *  COLLAPSE   2.5s  everyone thaws; the lids close and the last light goes out; the path
+ *  COLLAPSE  10.0s  everyone thaws; the lids close and the last light goes out; the path
  *                   winds back front-to-eye; ribbons snap; the shell breaks down from the crown
  *                   down to the floor pole and only then does the blackout lift; the world returns
  * </pre>
@@ -259,11 +259,6 @@ public class Session extends DomainSession {
         return false;
     }
 
-    /** Quantise a 0..1 front to whole frames, so the void spreads in discrete rings. */
-    private static double stepped(double v) {
-        return Math.floor(MathUtil.clamp(v, 0.0, 1.0) * 24.0) / 24.0;
-    }
-
     private void refreshSkyPlayers() {
         World world = world();
         if (world == null) return;
@@ -354,7 +349,7 @@ public class Session extends DomainSession {
             Projector.flash(origin.clone().add(0, 1.0, 0));
         }
 
-        // The film runs at a fixed rate, so the barrier advances in whole frames.
+        // The film runs at a fixed rate; the barrier front itself advances continuously.
         double reel = MathUtil.clamp(t / Math.max(0.05, cfg.expandSeconds), 0.0, 1.0);
 
         // The world drains to midnight
@@ -367,7 +362,7 @@ public class Session extends DomainSession {
 
         // The void: the studio floor forms during the lead-in, then the shell
         // rises from the floor's edge and closes at the crown.
-        blackout.setFormationProgress(stepped(reel));
+        blackout.setFormationProgress(FormationProgress.continuous(reel));
         floor.expand(blackout.floorProgress());
         blackout.setFloorFrontRadius(floor.builtRadius());
         spawnClosingRim(world, blackout.shellProgress());
@@ -546,7 +541,7 @@ public class Session extends DomainSession {
         double p = MathUtil.smoothstep(t / cfg.collapseSeconds);
         // The reverse of the formation: the front walks back down, so the crown
         // breaks first and the studio floor is the last thing to go.
-        blackout.setFormationProgress(stepped(1.0 - p));
+        blackout.setFormationProgress(FormationProgress.continuous(1.0 - p));
 
         // The floor sinks back into the world from the rim inwards, after the
         // walls are gone.
