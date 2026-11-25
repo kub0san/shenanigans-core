@@ -107,14 +107,20 @@ public final class LoadoutPolicy {
         ItemStack canonical = custom.stack();
         if (canonical == null || canonical.getType().isAir()) return false;
         if (!ownership.owns(custom.entryId())) return false;
-        return canonical.isSimilar(item);
+        // isSimilar ignores the amount: a forged 64-stack carrying a legitimate one-item stamp
+        // must not deploy as a whole stack of custom items.
+        return canonical.isSimilar(item) && canonical.getAmount() == item.getAmount();
     }
 
-    /** Adapts the live catalog to the pure seam: disabled/absent/non-item rows resolve to null. */
+    /**
+     * Adapts the live catalog to the pure seam. Stamps from a pre-migration layout are resolved
+     * through the catalog's own id migration, so an old sword still finds its canonical row;
+     * disabled, absent and non-item rows still resolve to null.
+     */
     public static CatalogLookup catalogLookup(ShopCatalog catalog) {
         return stampedId -> {
             if (catalog == null || stampedId == null) return null;
-            ShopEntry entry = catalog.entry(stampedId);
+            ShopEntry entry = catalog.entry(ShopCatalog.canonicalCustomItemId(stampedId));
             if (entry == null || !entry.enabled() || !entry.isCustomItem()) return null;
             ItemStack canonical = catalog.itemStack(entry);
             if (canonical == null || canonical.getType().isAir()) return null;

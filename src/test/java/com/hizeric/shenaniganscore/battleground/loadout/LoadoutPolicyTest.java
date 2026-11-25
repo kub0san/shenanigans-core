@@ -79,6 +79,24 @@ class LoadoutPolicyTest {
     }
 
     @Test
+    void aForgedStackOfAnOwnedCustomItemIsRejected() {
+        ItemStack[] kit = kit();
+        ItemStack canonical = stamped(Material.DIAMOND_SWORD, ITEM_ID);
+        ItemStack forged = canonical.clone();
+        forged.setAmount(64); // isSimilar ignores amount; only the explicit check rejects this
+
+        ItemStack[] input = kit.clone();
+        input[0] = forged;
+
+        LoadoutPolicy.Result result = LoadoutPolicy.sanitize(
+                input, kit, enabledCatalog(canonical), id -> true);
+
+        assertEquals(Material.DIAMOND_SWORD, result.slots()[0].getType());
+        assertEquals(1, result.slots()[0].getAmount(), "the forged whole stack is replaced, not kept");
+        assertEquals(1, result.replaced());
+    }
+
+    @Test
     void aStampedButNoncanonicalMaceIsRejected() {
         ItemStack[] kit = kit();
         ItemStack[] input = kit.clone();
