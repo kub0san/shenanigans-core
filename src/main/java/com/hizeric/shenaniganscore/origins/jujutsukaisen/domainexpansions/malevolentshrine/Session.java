@@ -1074,7 +1074,7 @@ public class Session extends DomainSession {
         skyPlayers.clear();
 
         // Slashes self-remove, but delayed RAVAGE stages can still be in flight
-        // when a forced close/shatter ends the domain: drop every owned display.
+        // when a forced close ends the domain: drop every owned display.
         slashDisplays.dispose();
 
         // Remove every display entity

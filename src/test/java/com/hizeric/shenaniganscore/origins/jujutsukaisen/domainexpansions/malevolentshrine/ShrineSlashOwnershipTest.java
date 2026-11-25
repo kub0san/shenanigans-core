@@ -63,6 +63,20 @@ class ShrineSlashOwnershipTest {
     }
 
     @Test
+    void disposeSkipsDisplaysThatSelfRemovedAfterRegistration() {
+        SlashDisplayRegistry registry = new SlashDisplayRegistry();
+        FakeDisplay ghost = new FakeDisplay();
+        registry.own(ghost, FakeDisplay::isValid, FakeDisplay::remove);
+
+        // The slash's own cleanup ran first; a later forced close must not remove it again.
+        ghost.remove();
+        registry.dispose();
+
+        assertEquals(1, ghost.removals, "dispose must re-check validity before invoking the remover");
+        assertEquals(0, registry.ownedCount());
+    }
+
+    @Test
     void ravageRunnableStopsWhenTheSessionIsNotActive() {
         assertTrue(ShrineSessionDecision.shouldKeepRavageRunnable(true, -5),
                 "a pending per-victim stagger must still be allowed to wait");

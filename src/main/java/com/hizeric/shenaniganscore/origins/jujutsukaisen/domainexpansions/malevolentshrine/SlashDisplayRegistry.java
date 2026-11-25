@@ -36,7 +36,8 @@ final class SlashDisplayRegistry {
     /** Removes every owned display, including ones from delayed stages still in flight. */
     void dispose() {
         for (Owned entry : owned) {
-            entry.remove();
+            // A slash may have self-removed since registration; do not remove it twice.
+            if (entry.valid()) entry.remove();
         }
         owned.clear();
     }
