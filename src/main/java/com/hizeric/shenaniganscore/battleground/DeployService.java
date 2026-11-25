@@ -175,8 +175,9 @@ final class DeployService {
         m.combat.clear(uuid);
         // leave() drops the mode flags before the outward teleports below. Without a permit the
         // guard sees an unauthorised origin inside the arena and schedules an ejection instead of
-        // allowing this legitimate exit. Cover both teleports: StagingController.exit() clears any
-        // pending permit even for a merely-deployed player, so the deferred exit needs a fresh one.
+        // allowing this legitimate exit. The first permit is kept for the staging-path contract;
+        // StagingController.exit() clears it before teleporting today, so only the second permit is
+        // consumed, by this class's deployed exit teleport below.
         ArenaEntryGuard.get().allowOnce(player);
         m.staging.exit(player); // teleports to the return point when staged
         restoreInventory(player);
@@ -184,7 +185,7 @@ final class DeployService {
         Location destination = RespawnTarget.resolve(
                 region == null ? null : region.spawn(), player.getWorld().getSpawnLocation(), region);
         if (!wasStaged) {
-            // The staging call above consumed the first permit without teleporting, so refresh it.
+            // The staging call above cleared the first permit without teleporting, so refresh it.
             ArenaEntryGuard.get().allowOnce(player);
             player.teleport(destination);
         }
