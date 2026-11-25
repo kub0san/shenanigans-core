@@ -50,6 +50,7 @@ abilities:
       hit-charge-recharge: 10
       empowered-hit-damage-cap: 12.0
       depleted-hit-damage-cap: 4.0
+      impact-rebound-y: 0.45
   techniques:
     blue:
       cooldown: 30

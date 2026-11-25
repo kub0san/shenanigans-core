@@ -15,6 +15,7 @@ import java.util.List;
 
 import static com.hizeric.shenaniganscore.core.config.AbilityTuningConfig.Section.ITEMS;
 
+/** Identity and catalogue row for the Momentum Mace. */
 public final class MomentumMaceItem {
     public static final String ID = MomentumMaceId.NEW_ID;
     public static final String DISPLAY_NAME = "Momentum Mace";

@@ -1,18 +1,29 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.mace;
 
-import org.bukkit.Bukkit;
+import com.hizeric.shenaniganscore.ShenanigansCore;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/** Bounded, single-owner Meteor Dive. Ends idempotently and never leaves movement modifiers. */
 public final class MomentumMaceDiveTask extends BukkitRunnable {
+    private static final Map<UUID, MomentumMaceDiveTask> ACTIVE = new ConcurrentHashMap<>();
+    private static final int MAX_TICKS = 30;
+
+    private enum State { PREPARE, DIVE, DONE }
     private final Player player;
-    private final org.bukkit.World originWorld;
+    private final World originWorld;
     private final Location start;
+    private State state = State.PREPARE;
+    private boolean airborneSeen;
     private int ticks;
-    private boolean impacted;
-    private final int maxTicks = 30;
 
     private MomentumMaceDiveTask(Player player) {
         this.player = player;
@@ -21,20 +32,30 @@ public final class MomentumMaceDiveTask extends BukkitRunnable {
     }
 
     public static void start(Player player) {
-        new MomentumMaceDiveTask(player).runTaskTimer(
-                com.hizeric.shenaniganscore.ShenanigansCore.getInstance(), 0L, 1L);
+        MomentumMaceDiveTask old = ACTIVE.remove(player.getUniqueId());
+        if (old != null) old.finish();
+        MomentumMaceDiveTask task = new MomentumMaceDiveTask(player);
+        ACTIVE.put(player.getUniqueId(), task);
+        task.runTaskTimer(ShenanigansCore.getInstance(), 0L, 1L);
     }
 
     @Override
     public void run() {
-        if (!player.isOnline() || player.isDead()) { finish(); return; }
-        if (player.getWorld() != originWorld) { finish(); return; }
-        if (player.getGameMode() == org.bukkit.GameMode.SPECTATOR) { finish(); return; }
-        Location cur = player.getLocation();
-        if (cur.distanceSquared(start) > 4096) { finish(); return; }
+        if (!owns(player)) { finish(); return; }
         ticks++;
-        if (ticks > maxTicks) { finish(); return; }
-        if (impacted) { finish(); return; }
+        if (ticks > MAX_TICKS) { finish(); return; }
+
+        if (state == State.PREPARE) {
+            // Grounded casts get a tiny takeoff so the starting ground is never mistaken for impact.
+            Vector v = player.getVelocity();
+            v.setY(Math.max(v.getY(), 0.6));
+            player.setVelocity(v);
+            player.setFallDistance(0f);
+            state = State.DIVE;
+            return;
+        }
+        if (state != State.DIVE) { finish(); return; }
+
         Vector v = player.getVelocity();
         Vector dir = player.getLocation().getDirection();
         double hx = dir.getX(), hz = dir.getZ();
@@ -45,18 +66,31 @@ public final class MomentumMaceDiveTask extends BukkitRunnable {
         v.setY(Math.min(v.getY(), -1.75));
         player.setVelocity(v);
         player.setFallDistance(0f);
-        if (player.isOnGround()) {
-            impacted = true;
+        if (!player.isOnGround()) airborneSeen = true;
+        if (airborneSeen && player.isOnGround()) {
             Vector rv = player.getVelocity();
             rv.setY(0.95);
             rv.setX(rv.getX() + hx * 0.3);
             rv.setZ(rv.getZ() + hz * 0.3);
             player.setVelocity(rv);
             player.setFallDistance(0f);
-            MomentumMaceFx.dive(player);
+            MomentumMaceFx.impact(player);
+            state = State.DONE;
             finish();
         }
     }
 
-    private void finish() { try { cancel(); } catch (IllegalStateException ignored) { } }
+    private boolean owns(Player p) {
+        if (!p.isOnline() || p.isDead() || p.getWorld() != originWorld) return false;
+        if (p.getGameMode() != GameMode.SURVIVAL && p.getGameMode() != GameMode.ADVENTURE) return false;
+        if (p.isInsideVehicle() || p.isFlying() || p.isGliding()) return false;
+        if (p.getLocation().distanceSquared(start) > 4096) return false;
+        return ACTIVE.get(p.getUniqueId()) == this;
+    }
+
+    private void finish() {
+        state = State.DONE;
+        ACTIVE.remove(player.getUniqueId(), this);
+        try { cancel(); } catch (IllegalStateException ignored) { }
+    }
 }
