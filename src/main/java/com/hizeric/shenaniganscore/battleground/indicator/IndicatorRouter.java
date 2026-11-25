@@ -7,16 +7,21 @@ import org.bukkit.entity.Player;
 
 import java.util.UUID;
 
+/**
+ * Routes battleground HUD notices to the action bar.
+ *
+ * <p>Sends are deliberately direct and unthrottled: cooldown notices and sticky
+ * hints must reach the player on every call. Suppression during a live domain is
+ * the only gate, and it is unchanged by the removal of the unused HUD throttle.</p>
+ */
 public final class IndicatorRouter {
 
     private static final MiniMessage MM = MiniMessage.miniMessage();
 
     private final ShenanigansCore plugin;
-    private final HudController controller;
 
     public IndicatorRouter(ShenanigansCore plugin) {
         this.plugin = plugin;
-        this.controller = new HudController(plugin);
     }
 
     public void send(Player player, String miniMessage) {
@@ -31,13 +36,5 @@ public final class IndicatorRouter {
 
     public boolean isSuppressed(UUID playerId) {
         return plugin.getSessionManager().hasActiveSession(playerId);
-    }
-
-    public void forget(UUID playerId) {
-        controller.forget(playerId);
-    }
-
-    public HudController controller() {
-        return controller;
     }
 }
