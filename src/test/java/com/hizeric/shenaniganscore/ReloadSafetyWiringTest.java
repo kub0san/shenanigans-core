@@ -104,13 +104,34 @@ class ReloadSafetyWiringTest {
         for (String hook : new String[] {
                 "battlegroundManager.disable()", "diffWriter.shutdown()", "SetupSession.cancelAll()",
                 "Databases.closeAndClear()", "sessionManager.stopAll()",
-                "DomainBlockOverlayManager.get().shutdown()", "ClientBlockUtils.shutdown()",
+                "ClientBlockUtils.shutdown()",
                 "MannequinEchoRenderer.shutdown()", "DashVisibilityMask.shutdown()",
                 "GuiChatPrompt.shutdown()", "DomainRegistry.get().clearAll()",
                 "CameraShake.restoreAll()", "WorldEditBridge.setEnabled(false)",
                 "DomainFloorRestoreLedger.cancelReplay()", "Bukkit.getScheduler().cancelTasks(this)"}) {
             assertTrue(body.contains(hook), "teardown must still run: " + hook);
         }
+    }
+
+    @Test
+    void theUnusedDomainBlockOverlaySubsystemIsGone() throws IOException {
+        Path overlayManager = Path.of("src", "main", "java", "com", "hizeric",
+                "shenaniganscore", "core", "network", "DomainBlockOverlayManager.java");
+        Path overlayListener = Path.of("src", "main", "java", "com", "hizeric",
+                "shenaniganscore", "listeners", "OverlayListener.java");
+
+        assertFalse(Files.exists(overlayManager),
+                "DomainBlockOverlayManager had no callers and must not be shipped");
+        assertFalse(Files.exists(overlayListener),
+                "OverlayListener only resynced the unused overlay manager");
+
+        String source = Files.readString(MAIN, StandardCharsets.UTF_8);
+        assertFalse(source.contains("DomainBlockOverlayManager"),
+                "no plugin wiring may reference the removed overlay manager");
+        assertFalse(source.contains("OverlayListener"),
+                "no plugin wiring may register the removed overlay listener");
+        assertFalse(source.contains("domain overlays"),
+                "the removed overlay subsystem must not keep a shutdown hook label");
     }
 
     @Test
