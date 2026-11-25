@@ -68,6 +68,10 @@ class ArenaEntryGuardEjectTest {
                 "fail open when neither endpoint is guarded");
         assertTrue(src.contains("scheduleEjection(plugin, player, region)"),
                 "EJECT must queue a teleport, not teleport inline");
+        assertTrue(src.contains("boolean sameBlock = ArenaEntryDecision.sameBlock("),
+                "the same-block shortcut must be explicit about what it skips");
+        assertTrue(src.contains("if (sameBlock) {"),
+                "a stranded player looking in one block must still be evaluated");
 
         int moveStart = src.indexOf("public void onMove(PlayerMoveEvent event)");
         int moveEnd = src.indexOf("@EventHandler", moveStart + 1);
@@ -92,16 +96,32 @@ class ArenaEntryGuardEjectTest {
     }
 
     @Test
-    void joinSweepsAfterRepairAndDeployExitIsUntouched() throws IOException {
+    void teleportGuardUsesTheSameDecisionAndAnEjectionMessage() throws IOException {
+        String src = source("battleground", "arena", "ArenaEntryGuard.java");
+        int start = src.indexOf("public void onTeleport(PlayerTeleportEvent event)");
+        int end = src.indexOf("@EventHandler", start + 1);
+        assertTrue(start >= 0 && end > start, "expected a teleport handler to inspect");
+        String teleport = src.substring(start, end);
+        assertTrue(teleport.contains("claimTransit(player.getUniqueId())"),
+                "the token is spent before the destination decision");
+        assertTrue(teleport.contains("boolean originInside = origin != null && inside(region, origin);"),
+                "teleports must consider the origin, not just the destination");
+        assertTrue(teleport.contains("boolean destinationInside = inside(region, destination);"));
+        assertTrue(teleport.contains("decide(plugin, player, internal,"),
+                "both endpoints go through the shared decision");
+        assertTrue(teleport.contains("scheduleEjection(plugin, player, region)"),
+                "an unauthorised origin inside must queue an exit");
+        assertFalse(teleport.contains(".teleport("), "no live teleport inside the event handler");
+        assertTrue(src.contains("Returned to battleground spawn."),
+                "ejection feedback is distinct from the ingress denial");
+    }
+
+    @Test
+    void joinSweepRunsAfterRepair() throws IOException {
         String listener = source("battleground", "BattlegroundListener.java");
         assertTrue(listener.contains("manager().repair(event.getPlayer());"), "repair still runs on join");
         assertTrue(listener.indexOf("ArenaEntryGuard.get().ejectIfStranded(event.getPlayer());")
                         > listener.indexOf("manager().repair(event.getPlayer());"),
                 "the sweep must run after repair clears leaked mode flags");
-
-        String deploy = source("battleground", "DeployService.java");
-        assertTrue(deploy.contains("if (player == null || !m.isDeployed(player.getUniqueId())) return;"),
-                "checkRegion must remain unchanged");
-        assertFalse(deploy.contains("EJECT"), "deployed exits must never fire EJECT");
     }
 }

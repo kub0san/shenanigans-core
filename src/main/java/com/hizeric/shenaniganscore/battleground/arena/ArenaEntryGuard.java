@@ -36,9 +36,10 @@ import java.util.concurrent.TimeUnit;
  * unrelated entry); denial messages are rate limited instead of spamming every tick a player pushes
  * against the border; per-move checks do the cheap coordinate test before any world lookup;
  * quitting clears a player's token and cooldown. Issue #64 additionally ejects an unauthorised
- * player who is <em>already</em> inside the guarded volume instead of letting them walk out: the
- * teleport is scheduled off the move event, guarded by a one-shot token and a per-player queue so
- * it neither runs inside {@link PlayerMoveEvent} nor double-fires with the deployment exit path.</p>
+ * player who is <em>already</em> inside the guarded volume instead of letting them walk or teleport
+ * out: the teleport is scheduled off the event, guarded by a one-shot token and a per-player queue
+ * so it neither runs inside {@link PlayerMoveEvent} nor double-fires with the deployment exit path.
+ * An ejection gets its own rate-limited message, not the ingress denial.</p>
  */
 public final class ArenaEntryGuard implements Listener {
 
@@ -55,6 +56,7 @@ public final class ArenaEntryGuard implements Listener {
     private static final int BELOW_ARENA_MARGIN = 16;
 
     private static final String DENIED = "<red>You can only get into the arena by joining the battleground.";
+    private static final String EJECTED = "<gray>Returned to battleground spawn.";
 
     /** Player to the nanoTime deadline of their pending token. */
     private final Map<UUID, Long> internalTransit = new ConcurrentHashMap<>();
@@ -132,12 +134,24 @@ public final class ArenaEntryGuard implements Listener {
         // Spend the token on this teleport before deciding whether the destination is
         // guarded: an outward teleport must not leave a token for a later inward one.
         boolean internal = claimTransit(player.getUniqueId());
-        if (region == null || !inside(region, destination)) return; // nothing to guard
-
-        if (allowed(plugin, player, internal)) return;
+        if (region == null) return;
+        // A teleport out of the arena is not automatically an authorised exit: /back, an ender
+        // pearl or another plugin must not let a stranded unauthorised player slip past the guard.
+        // Apply the same origin/destination decision as onMove: ALLOW keeps authorised exits (the
+        // scheduling token, admins, deployed and staged players), EJECT queues the real exit.
+        Location origin = event.getFrom();
+        boolean originInside = origin != null && inside(region, origin);
+        boolean destinationInside = inside(region, destination);
+        ArenaEntryDecision.Verdict verdict = decide(plugin, player, internal,
+                originInside, destinationInside);
+        if (verdict == ArenaEntryDecision.Verdict.ALLOW) return;
 
         event.setCancelled(true);
-        deny(player);
+        if (verdict == ArenaEntryDecision.Verdict.EJECT) {
+            scheduleEjection(plugin, player, region);
+        } else {
+            deny(player);
+        }
     }
 
     @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
@@ -145,27 +159,31 @@ public final class ArenaEntryGuard implements Listener {
         Location to = event.getTo();
         Location from = event.getFrom();
         if (to == null || from == null) return; // fail open on missing coordinates
-        // Only a change of block matters; looking around (or moving within one block) must
-        // never snap the player. Y counts too, or a player could fall in vertically.
-        if (ArenaEntryDecision.sameBlock(from.getBlockX(), from.getBlockY(), from.getBlockZ(),
-                to.getBlockX(), to.getBlockY(), to.getBlockZ())) return;
-
         ShenanigansCore plugin = ShenanigansCore.getInstance();
         ArenaRegion region = activeRegion(plugin);
         if (region == null) return;
+        // A change of block matters for ingress/exit, and Y counts too so a player cannot fall in
+        // vertically. Looking around within one block must not pin an ordinary player — but a
+        // stranded player looking around inside must still be ejectable, so containment is checked
+        // before the same-block early return.
+        boolean sameBlock = ArenaEntryDecision.sameBlock(from.getBlockX(), from.getBlockY(),
+                from.getBlockZ(), to.getBlockX(), to.getBlockY(), to.getBlockZ());
         // Compute both sides before the early return: an unauthorised origin inside the arena is
         // an exit that must be ejected, not an ingress that can simply be ignored.
         boolean toInside = inside(region, to);
         boolean fromInside = inside(region, from);
-        if (!toInside && !fromInside) return;
+        if (sameBlock) {
+            if (!fromInside) return; // ordinary outside/looking move: no pin, no ejection
+        } else if (!toInside && !fromInside) return;
 
         Player player = event.getPlayer();
         ArenaEntryDecision.Verdict verdict = decide(plugin, player, false, fromInside, toInside);
         if (verdict == ArenaEntryDecision.Verdict.ALLOW) return;
 
         // DENY (ingress) and EJECT (stranded inside) both pin the player to their origin now;
-        // EJECT additionally schedules the real exit off this move event.
-        event.setTo(from);
+        // EJECT additionally schedules the real exit off this move event. A same-block look is
+        // only ever EJECT, and pinning it would undo the look, so leave its coordinates alone.
+        if (!sameBlock) event.setTo(from);
         if (verdict == ArenaEntryDecision.Verdict.EJECT) {
             scheduleEjection(plugin, player, region);
         } else {
@@ -230,7 +248,7 @@ public final class ArenaEntryGuard implements Listener {
         UUID uuid = player.getUniqueId();
         if (!ejecting.add(uuid)) return; // already queued: no double teleport
         allowOnce(player);
-        deny(player);
+        ejected(player);
         Location destination = RespawnTarget.resolve(
                 region.spawn(), player.getWorld().getSpawnLocation(), region);
         Bukkit.getScheduler().runTask(plugin, () -> {
@@ -273,12 +291,22 @@ public final class ArenaEntryGuard implements Listener {
                 destination.getBlockZ()) && region.inWorld(destination.getWorld());
     }
 
-    /** At most one denial message every two seconds per player. */
-    private void deny(Player player) {
+    /** At most one feedback message every two seconds per player, shared by both flavours. */
+    private void tell(Player player, String message) {
         long now = System.nanoTime();
         Long last = lastDenied.get(player.getUniqueId());
         if (last != null && now - last < MESSAGE_COOLDOWN_NANOS) return;
         lastDenied.put(player.getUniqueId(), now);
-        player.sendMessage(MiniMessage.miniMessage().deserialize(DENIED));
+        player.sendMessage(MiniMessage.miniMessage().deserialize(message));
+    }
+
+    /** Ingress denial: the arena is only reachable by joining the battleground. */
+    private void deny(Player player) {
+        tell(player, DENIED);
+    }
+
+    /** Ejection feedback: distinct from the ingress denial, and on the same rate limit. */
+    private void ejected(Player player) {
+        tell(player, EJECTED);
     }
 }
