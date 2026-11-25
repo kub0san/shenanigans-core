@@ -89,7 +89,17 @@ class ArenaEntryGuardEjectTest {
         assertTrue(src.contains("Bukkit.getScheduler().runTask(plugin"),
                 "the teleport must be scheduled, not inline");
         assertTrue(src.contains("RespawnTarget.resolve("), "eject to the persisted return point");
-        assertTrue(src.contains("deny(player)"), "reuse the rate-limited denial feedback");
+        // The ejection message must come from the ejection path, not be borrowed from ingress.
+        int ejectStart = src.indexOf("private void scheduleEjection(");
+        int ejectEnd = src.indexOf("private boolean allowed(", ejectStart);
+        assertTrue(ejectStart >= 0 && ejectEnd > ejectStart, "expected a scheduleEjection helper");
+        String schedule = src.substring(ejectStart, ejectEnd);
+        assertTrue(schedule.contains("ejected(player)"),
+                "the queued exit emits the distinct ejection feedback");
+        assertFalse(schedule.contains("deny(player)"),
+                "an ejection must never send the ingress denial message");
+        assertTrue(src.contains("tell(player, EJECTED, lastEjected)"),
+                "ejection feedback has its own rate limit, separate from ingress denial");
         assertTrue(src.contains("ejecting.remove(uuid)"), "clear the queue flag on quit and on run");
         assertTrue(src.contains("public void ejectIfStranded(Player player)"),
                 "join-time sweep must be reachable from the listener");
@@ -123,5 +133,13 @@ class ArenaEntryGuardEjectTest {
         assertTrue(listener.indexOf("ArenaEntryGuard.get().ejectIfStranded(event.getPlayer());")
                         > listener.indexOf("manager().repair(event.getPlayer());"),
                 "the sweep must run after repair clears leaked mode flags");
+    }
+
+    @Test
+    void deployExitPathIsStillUntouched() throws IOException {
+        String deploy = source("battleground", "DeployService.java");
+        assertTrue(deploy.contains("if (player == null || !m.isDeployed(player.getUniqueId())) return;"),
+                "checkRegion must remain unchanged");
+        assertFalse(deploy.contains("EJECT"), "deployed exits must never fire EJECT");
     }
 }

@@ -1,13 +1,17 @@
 package com.hizeric.shenaniganscore.battleground.arena;
 
 import com.hizeric.shenaniganscore.ShenanigansCore;
+import com.hizeric.shenaniganscore.battleground.BattlegroundListener;
 import com.hizeric.shenaniganscore.battleground.BattlegroundManager;
+import com.hizeric.shenaniganscore.battleground.deploy.DiveService;
+import com.hizeric.shenaniganscore.battleground.player.ArenaInventories;
 import com.hizeric.shenaniganscore.battleground.player.StagingController;
 import com.hizeric.shenaniganscore.battleground.player.lifecycle.PlayerStateRegistry;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -85,7 +89,14 @@ class ArenaEntryGuardBehaviorTest {
         put(manager, "plugin", plugin);
         put(manager, "arenaStore", store);
         put(manager, "staging", staging);
+        put(manager, "inventories", new ArenaInventories());
+        put(manager, "dives", new DiveService());
         put(manager, "deployed", deployed);
+        // DeployService is package-private: allocate it without a constructor from this package.
+        Object deploys = UNSAFE.allocateInstance(
+                Class.forName("com.hizeric.shenaniganscore.battleground.DeployService"));
+        put(deploys, "m", manager);
+        put(manager, "deploys", deploys);
 
         Field managerField = ShenanigansCore.class.getDeclaredField("battlegroundManager");
         managerField.setAccessible(true);
@@ -99,6 +110,9 @@ class ArenaEntryGuardBehaviorTest {
         server.getPluginManager().registerEvents(guard, testPlugin);
         player = server.addPlayer();
         player.setLocation(inside); // setLocation fires no teleport event
+        // Drive the join sweep through the real listener so the test covers repair-then-sweep,
+        // not just a direct call into the guard helper.
+        server.getPluginManager().registerEvents(new BattlegroundListener(plugin), testPlugin);
 
         transit = fieldMap("internalTransit");
         ejecting = fieldSet("ejecting");
@@ -110,6 +124,7 @@ class ArenaEntryGuardBehaviorTest {
             transit.clear();
             ejecting.clear();
             fieldMap("lastDenied").clear();
+            fieldMap("lastEjected").clear();
         }
         if (instanceField != null) instanceField.set(null, previousInstance);
         MockBukkit.unmock();
@@ -213,7 +228,8 @@ class ArenaEntryGuardBehaviorTest {
 
     @Test
     void theJoinSweepEjectsAStrandedNonDeployedPlayer() {
-        guard.ejectIfStranded(player);
+        // A real PlayerJoinEvent drives BattlegroundListener.onJoin -> repair -> ejectIfStranded.
+        server.getPluginManager().callEvent(new PlayerJoinEvent(player, ""));
 
         assertTrue(guard.isEjectionPending(id()));
         assertEquals(EJECTION_MESSAGE, PLAIN.serialize(player.nextComponentMessage()));

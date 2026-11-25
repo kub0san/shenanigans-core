@@ -60,7 +60,9 @@ public final class ArenaEntryGuard implements Listener {
 
     /** Player to the nanoTime deadline of their pending token. */
     private final Map<UUID, Long> internalTransit = new ConcurrentHashMap<>();
+    /** Separate cooldowns: an ingress denial must not swallow a later ejection message. */
     private final Map<UUID, Long> lastDenied = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastEjected = new ConcurrentHashMap<>();
     /** Players with an ejection teleport already queued; prevents a move-tick teleport storm. */
     private final Set<UUID> ejecting = ConcurrentHashMap.newKeySet();
 
@@ -119,6 +121,7 @@ public final class ArenaEntryGuard implements Listener {
         UUID uuid = event.getPlayer().getUniqueId();
         internalTransit.remove(uuid);
         lastDenied.remove(uuid);
+        lastEjected.remove(uuid);
         ejecting.remove(uuid);
     }
 
@@ -291,22 +294,22 @@ public final class ArenaEntryGuard implements Listener {
                 destination.getBlockZ()) && region.inWorld(destination.getWorld());
     }
 
-    /** At most one feedback message every two seconds per player, shared by both flavours. */
-    private void tell(Player player, String message) {
+    /** At most one feedback message every two seconds per player, per feedback channel. */
+    private void tell(Player player, String message, Map<UUID, Long> cooldown) {
         long now = System.nanoTime();
-        Long last = lastDenied.get(player.getUniqueId());
+        Long last = cooldown.get(player.getUniqueId());
         if (last != null && now - last < MESSAGE_COOLDOWN_NANOS) return;
-        lastDenied.put(player.getUniqueId(), now);
+        cooldown.put(player.getUniqueId(), now);
         player.sendMessage(MiniMessage.miniMessage().deserialize(message));
     }
 
     /** Ingress denial: the arena is only reachable by joining the battleground. */
     private void deny(Player player) {
-        tell(player, DENIED);
+        tell(player, DENIED, lastDenied);
     }
 
-    /** Ejection feedback: distinct from the ingress denial, and on the same rate limit. */
+    /** Ejection feedback: distinct message and rate limit from the ingress denial. */
     private void ejected(Player player) {
-        tell(player, EJECTED);
+        tell(player, EJECTED, lastEjected);
     }
 }
