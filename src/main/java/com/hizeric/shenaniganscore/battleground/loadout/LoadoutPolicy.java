@@ -4,6 +4,7 @@ import com.hizeric.shenaniganscore.battleground.item.BattlegroundItemKeys;
 import com.hizeric.shenaniganscore.battleground.shop.ShopCatalog;
 import com.hizeric.shenaniganscore.battleground.shop.ShopEntry;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.List;
 
@@ -99,7 +100,10 @@ public final class LoadoutPolicy {
 
     private static boolean allowed(ItemStack item, ItemStack fallback,
                                    CatalogLookup catalog, OwnershipLookup ownership) {
-        if (fallback != null && fallback.isSimilar(item)) return true;
+        // isSimilar ignores the amount, so require it explicitly for both gates: a forged
+        // 64-stack must not pass as the one-item deliverable the player actually owns.
+        if (fallback != null && fallback.isSimilar(item)
+                && fallback.getAmount() == item.getAmount()) return true;
         String stampedId = BattlegroundItemKeys.idOf(item);
         if (stampedId == null || catalog == null || ownership == null) return false;
         CustomItem custom = catalog.enabledCustomItem(stampedId);
@@ -107,9 +111,15 @@ public final class LoadoutPolicy {
         ItemStack canonical = custom.stack();
         if (canonical == null || canonical.getType().isAir()) return false;
         if (!ownership.owns(custom.entryId())) return false;
-        // isSimilar ignores the amount: a forged 64-stack carrying a legitimate one-item stamp
-        // must not deploy as a whole stack of custom items.
-        return canonical.isSimilar(item) && canonical.getAmount() == item.getAmount();
+        // A pre-migration save carries the old stamp while the catalog row is canonical. Compare
+        // against a canonical clone restamped with this item's own id so only the stamp is forgiven:
+        // type, enchants, lore and every other metadata key still have to match the catalog stack.
+        ItemStack expected = canonical.clone();
+        ItemMeta meta = expected.getItemMeta();
+        if (meta == null) return false;
+        BattlegroundItemKeys.stamp(meta, stampedId);
+        expected.setItemMeta(meta);
+        return expected.isSimilar(item) && canonical.getAmount() == item.getAmount();
     }
 
     /**

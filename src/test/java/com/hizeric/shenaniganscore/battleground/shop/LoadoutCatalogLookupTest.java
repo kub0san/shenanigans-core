@@ -1,6 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.shop;
 
 import com.hizeric.shenaniganscore.battleground.item.BattlegroundItemKeys;
+import com.hizeric.shenaniganscore.battleground.loadout.KitDefaults;
 import com.hizeric.shenaniganscore.battleground.loadout.LoadoutPolicy;
 import com.hizeric.shenaniganscore.battleground.storage.Database;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
@@ -21,6 +22,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Issue #65: the real {@link LoadoutPolicy#catalogLookup(ShopCatalog)} adapter must resolve a
@@ -58,6 +60,63 @@ class LoadoutCatalogLookupTest {
         return new ShopEntry(CANONICAL_ID, ShopEntry.Category.ITEM, List.of(),
                 Material.NETHERITE_SWORD, "Dash Sword", 350, true,
                 CANONICAL_ID, stack.serialize(), 0);
+    }
+
+    /** A saved item keeps its own stamp; the catalog row is canonical. */
+    private static ItemStack restamp(ItemStack stack, String id) {
+        ItemStack copy = stack.clone();
+        ItemMeta meta = copy.getItemMeta();
+        BattlegroundItemKeys.stamp(meta, id);
+        copy.setItemMeta(meta);
+        return copy;
+    }
+
+    @Test
+    void aLegacyStampedCanonicalItemSurvivesSanitizeWhenOwnedAndEnabled() {
+        ItemStack[] kit = KitDefaults.items();
+        ItemStack[] input = kit.clone();
+        ItemStack canonical = LoadoutPolicy.catalogLookup(catalog)
+                .enabledCustomItem(CANONICAL_ID).stack();
+        input[0] = restamp(canonical, LEGACY_ID); // same deliverable, pre-migration stamp
+
+        LoadoutPolicy.Result result = LoadoutPolicy.sanitize(
+                input, kit, LoadoutPolicy.catalogLookup(catalog), id -> true);
+
+        assertEquals(Material.NETHERITE_SWORD, result.slots()[0].getType(),
+                "a legitimate pre-migration item must not be replaced with the kit default");
+        assertEquals(LEGACY_ID, BattlegroundItemKeys.idOf(result.slots()[0]));
+        assertEquals(0, result.replaced());
+        assertTrue(result.warnings().isEmpty());
+    }
+
+    @Test
+    void aLegacyStampedMaceIsStillRejectedBySanitize() {
+        ItemStack[] kit = KitDefaults.items();
+        ItemStack[] input = kit.clone();
+        input[0] = restamp(new ItemStack(Material.MACE), LEGACY_ID);
+
+        LoadoutPolicy.Result result = LoadoutPolicy.sanitize(
+                input, kit, LoadoutPolicy.catalogLookup(catalog), id -> true);
+
+        assertEquals(Material.DIAMOND_SWORD, result.slots()[0].getType(),
+                "forging the stamp onto another item type must not work");
+        assertEquals(1, result.replaced());
+    }
+
+    @Test
+    void aForgedStackOfAKitDefaultIsRejectedBySanitize() {
+        ItemStack[] kit = KitDefaults.items();
+        ItemStack[] input = kit.clone();
+        ItemStack forged = kit[1].clone(); // the bow, amount 1
+        forged.setAmount(64);
+        input[1] = forged;
+
+        LoadoutPolicy.Result result = LoadoutPolicy.sanitize(
+                input, kit, LoadoutPolicy.catalogLookup(catalog), id -> true);
+
+        assertEquals(kit[1].getAmount(), result.slots()[1].getAmount(),
+                "isSimilar ignores amount, so the fallback gate must check it explicitly");
+        assertEquals(1, result.replaced());
     }
 
     @Test

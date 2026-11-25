@@ -167,6 +167,20 @@ class LoadoutPolicyTest {
     }
 
     @Test
+    void aKitDefaultMatchRequiresTheSameAmount() {
+        ItemStack[] kit = kit();
+        ItemStack[] input = kit.clone();
+        ItemStack forged = kit[1].clone(); // the bow, amount 1
+        forged.setAmount(64);
+        input[1] = forged;
+
+        LoadoutPolicy.Result result = LoadoutPolicy.sanitize(input, kit, id -> null, id -> false);
+
+        assertEquals(1, result.slots()[1].getAmount(), "the forged kit-default stack is replaced");
+        assertEquals(1, result.replaced());
+    }
+
+    @Test
     void armourAndOffhandSlotsAreCoveredToo() {
         ItemStack[] kit = kit();
         ItemStack[] input = kit.clone();
