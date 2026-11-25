@@ -133,6 +133,28 @@ public final class AbilityTuningConfig {
         return root.node("abilities", section.key(), normalize(id), field);
     }
 
+    /** Bounded integer accessor under abilities.<section>.<id>.<field>. */
+    public int boundedInt(Section section, String id, String field, int fallback, int min, int max) {
+        if (root == null || section == null) return fallback;
+        ConfigurationNode node = root.node("abilities", section.key(), normalize(id), field);
+        Object raw = node.raw();
+        if (!(raw instanceof Number)) { reject(id, field, raw); return fallback; }
+        int value = node.getInt();
+        if (value < min || value > max) { reject(id, field, raw); return fallback; }
+        return value;
+    }
+
+    /** Bounded double accessor under abilities.<section>.<id>.<field>. */
+    public double boundedDouble(Section section, String id, String field, double fallback, double min, double max) {
+        if (root == null || section == null) return fallback;
+        ConfigurationNode node = root.node("abilities", section.key(), normalize(id), field);
+        Object raw = node.raw();
+        if (!(raw instanceof Number)) { reject(id, field, raw); return fallback; }
+        double value = node.getDouble();
+        if (!Double.isFinite(value) || value < min || value > max) { reject(id, field, raw); return fallback; }
+        return value;
+    }
+
     private static String normalize(String id) {
         return id == null ? "" : id.toLowerCase(Locale.ROOT).replace('_', '-');
     }

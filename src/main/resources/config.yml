@@ -44,6 +44,12 @@ abilities:
       cooldown: 30
     executioners-sword:
       cooldown: 90
+    momentum-mace:
+      cooldown: 30
+      max-hit-charges: 3
+      hit-charge-recharge: 10
+      empowered-hit-damage-cap: 12.0
+      depleted-hit-damage-cap: 4.0
   techniques:
     blue:
       cooldown: 30

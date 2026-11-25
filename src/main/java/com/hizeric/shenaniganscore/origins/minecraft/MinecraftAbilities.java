@@ -6,6 +6,9 @@ import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSword
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordHitListener;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordAbility;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordHitListener;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.mace.MomentumMaceAbility;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.mace.MomentumMaceFallProtection;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.mace.MomentumMaceHitListener;
 
 /**
  * Registration point for the Minecraft ability catalogue.
@@ -25,5 +28,9 @@ public final class MinecraftAbilities {
         ExecutionerSwordHitListener listener = new ExecutionerSwordHitListener();
         registry.register(ExecutionerSwordAbility.definition(listener));
         plugin.getServer().getPluginManager().registerEvents(listener, plugin);
+
+        registry.register(MomentumMaceAbility.definition());
+        plugin.getServer().getPluginManager().registerEvents(new MomentumMaceHitListener(), plugin);
+        plugin.getServer().getPluginManager().registerEvents(new MomentumMaceFallProtection(), plugin);
     }
 }
