@@ -3,7 +3,7 @@
 This file records the third-party components bundled into the `shenanigans-core` shadow
 jar. It lists versions and license names only; the full license text is available from
 each upstream project. The shadow jar also embeds the license/notice files shipped by
-those dependencies under `META-INF/` and a name-only `META-INF/NOTICE-*.txt` for every
+those dependencies under `META-INF/` and a name-only `META-INF/LICENSE-NOTICE-*.txt` for every
 runtime dependency.
 
 | Component | Coordinates | Version | License |

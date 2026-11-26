@@ -15,7 +15,7 @@ val bundledLicenseNames = mapOf(
     "sqlite-jdbc" to "The Apache Software License, Version 2.0",
 )
 
-// Upstream jars mostly ship no license file. Generate a name-only notice per runtime
+// Upstream jars mostly ship no license file. Generate a name-only license notice per runtime
 // dependency so every bundled component is identifiable inside the shadow jar (#52).
 val generateThirdPartyNotices = tasks.register("generateThirdPartyNotices") {
     val noticeDir = layout.buildDirectory.dir("generated/third-party-notices")
@@ -23,7 +23,7 @@ val generateThirdPartyNotices = tasks.register("generateThirdPartyNotices") {
     val notices = configurations.runtimeClasspath.get().sortedBy { it.name }.map { jar ->
         val license = bundledLicenseNames.entries.firstOrNull { jar.name.contains(it.key) }?.value
             ?: "See THIRD_PARTY_NOTICES.md"
-        "NOTICE-${jar.nameWithoutExtension}.txt" to "Third-party component: ${jar.name}\nLicense: $license\n"
+        "LICENSE-NOTICE-${jar.nameWithoutExtension}.txt" to "Third-party component: ${jar.name}\nLicense: $license\n"
     }
     inputs.files(configurations.runtimeClasspath)
     outputs.dir(noticeDir)
@@ -108,7 +108,7 @@ tasks {
     }
     shadowJar {
         // #52: bundle the license/notice resources shipped by runtime dependencies,
-        // plus one generated name-only notice per dependency (see generateThirdPartyNotices).
+        // plus one generated name-only license notice per dependency (see generateThirdPartyNotices).
         from(generateThirdPartyNotices) {
             into("META-INF")
         }
