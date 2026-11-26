@@ -93,14 +93,15 @@ public final class HubScreen extends GuiScreen {
 
     @Override
     protected void renderChrome(StaticPane chrome) {
-        // Same reply shape as /bg help: the full two-root overview, sent line by line.
+        // Same reply shape as /bg help: the full three-root overview, sent line by line.
         put(chrome, 7, dockRow(), GuiTheme.named(Material.PAPER, GuiTheme.accent() + "<bold>", "HELP",
                 GuiTheme.dim("List every command")),
                 (p, e) -> {
                     GuiSounds.click(p);
                     for (String line : CommandHelp.render(List.of(
                             new BattlegroundCommand(plugin).root(),
-                            new AbilityCommand(plugin).root()), null)) {
+                            new AbilityCommand(plugin).root(),
+                            ShenanigansCore.leaveRoot(plugin)), null)) {
                         p.sendMessage(MM.deserialize(line));
                     }
                 });

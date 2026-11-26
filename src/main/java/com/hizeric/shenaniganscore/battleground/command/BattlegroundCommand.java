@@ -28,10 +28,12 @@ public final class BattlegroundCommand {
     private final ShenanigansCore plugin;
     private final CommandNode root;
     private final CommandNode abilityRoot;
+    private final CommandNode leaveRoot;
 
     public BattlegroundCommand(ShenanigansCore plugin) {
         this.plugin = plugin;
         this.abilityRoot = new AbilityCommand(plugin).root();
+        this.leaveRoot = ShenanigansCore.leaveRoot(plugin);
         this.root = buildTree();
     }
 
@@ -47,7 +49,7 @@ public final class BattlegroundCommand {
     private CommandNode buildTree() {
         return Cmd.root("battleground", "Battleground commands", Permissions.USE, CommandNode.Group.PLAYER)
                 .aliases("bg")
-                .runs(ctx -> ctx.reply(CommandHelp.render(List.of(this.root, abilityRoot), null)))
+                .runs(ctx -> ctx.reply(CommandHelp.render(List.of(this.root, abilityRoot, leaveRoot), null)))
 
                 // ---- player ----
                 .child(Cmd.leaf("join", "Stage for the next round", Permissions.USE, CommandNode.Group.PLAYER)
@@ -69,10 +71,10 @@ public final class BattlegroundCommand {
                             else ctx.reply("Only usable in the battleground.");
                         }))
                 .child(Cmd.leaf("help", "Show this help, or help for one command", Permissions.USE, CommandNode.Group.PLAYER)
-                        .runs(ctx -> ctx.reply(CommandHelp.render(List.of(this.root, abilityRoot), null)))
+                        .runs(ctx -> ctx.reply(CommandHelp.render(List.of(this.root, abilityRoot, leaveRoot), null)))
                         .arg("topic", CommandNode.Arg.WORD,
                                 ctx -> ctx.reply(CommandHelp.render(
-                                        List.of(this.root, abilityRoot), ctx.argument()))))
+                                        List.of(this.root, abilityRoot, leaveRoot), ctx.argument()))))
 
                 // ---- admin ----
                 .child(Cmd.leaf("setspawn", "Set the return point here", Permissions.BG_ADMIN, CommandNode.Group.ADMIN)

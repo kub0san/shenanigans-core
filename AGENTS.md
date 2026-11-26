@@ -1,6 +1,6 @@
 # AGENTS.md — shenanigans-core
 
-Paper PvP plugin: an origin-agnostic collection of abilities, items and concepts from other series for a personal server. Jujutsu Kaisen (four Domain Expansions + six techniques) and Minecraft (dash sword, Executioner sword, Momentum mace) are the implemented origins; Terraria and others are planned. Not a serious or balanced PvP plugin. Single module, base package `com.hizeric.shenaniganscore`. Java 25, Gradle 9.8.2 wrapper. Licensed under GPL-3.0 (see LICENSE).
+Paper PvP plugin: an origin-agnostic collection of abilities, items and concepts from other series for a personal server. Jujutsu Kaisen (four Domain Expansions + six techniques) and Minecraft (dash sword, Executioner axe, Momentum mace) are the implemented origins; Terraria and others are planned. Not a serious or balanced PvP plugin. Single module, base package `com.hizeric.shenaniganscore`. Java 25, Gradle 9.8.2 wrapper. Licensed under GPL-3.0 (see LICENSE).
 
 **Platform split:** target/main server is **Paper 26.3 (Java 25)**. The **only local test server** is `C:\Tools\global-test-server-26.3` (Leaf 26.3-27, API `26.3.build.27-alpha`, Java 25, game port 25566, offline/cracked, qcart-only player data, three restored loopback bridges); manage it with `TestServer.ps1` (see `../GLOBAL_TEST_SERVER.md`); the old 1.21.11 server was retired 2026-11-23. The plugin compiles against the 1.21.11 API for binary compatibility upward; recheck version-specific behaviour (particles, mappings, reflection) on 26.3 before release. From MC 26.1 Paper is deobfuscated and reobfuscation is unsupported, so use Mojang mappings for 26.x work.
 
@@ -22,9 +22,10 @@ Paper/Leaf only; not Folia.
 
 ## In-game commands
 
-`/bg` (alias of `/battleground`) and `/ability` are the only roots; `paper-plugin.yml` declares no `commands` section. Each is one fluent `Cmd` tree (`BattlegroundCommand`, `AbilityCommand`) → Brigadier nodes via `CommandRegistrar`, which validates the tree at startup. Leaves support two typed trailing args (`WORD`/`INTEGER`) for the giveaway commands; `CommandHelp` renders from the same tree.
+`/bg` (alias `/battleground`), `/ability` (alias `/ab`) and `/leave` are the roots; `paper-plugin.yml` declares no `commands` section. Each root is one fluent `Cmd` tree, registered as Brigadier nodes via `CommandRegistrar`, which validates the tree at startup. Leaves support two typed trailing args (`WORD`/`INTEGER`) for the giveaway commands; `CommandHelp` renders from the same tree.
 
 - Player (`shenaniganscore.use`): `/bg join`, `/bg leave`, `/bg help [topic]`, `/ability 1|2|3` (alias `/ab`).
+- `/leave` returns to the hub; `/bg spawn` and the exact bare `/spawn` are battleground-only leave aliases, blocked while a domain lock is active.
 - Admin (`shenaniganscore.battleground.admin`): `/bg setspawn`, `/bg setup`, `/bg reload`, `/bg debug ability|item <id>`, `/bg credits|streak add|remove|set <player|all> <amount>` (online targets only; `all` = online; works from console; streaks reset on death/round boundary).
 - Domains have no public activation path. `/bg debug ability <id>` is the only way to cast one — full namespaced ids are listed and tab-completed, admin-gated, self-only, bypasses cooldown/ownership/rail gates, and a live domain blocks a second cast. There are no `/fuga`, `/red`, `/blue`, `/purple`, `/shrine`, `/void`, `/timecell`, `/technique`, `/bg admin ...`, `/shop` or `/mcitem` commands; casting is `/ability 1..3` only.
 
@@ -34,7 +35,7 @@ Paper/Leaf only; not Folia.
 - `origins/<series>/` — one folder per origin; an origin assembles its catalogue and registers it behind neutral core interfaces. Origins present: `jujutsukaisen` and `minecraft`.
 - `origins/jujutsukaisen/domainexpansions/{malevolentshrine,unlimitedvoid,timecellmoonpalace,wombprofusion}` — four domains, one folder each, each with an `Ability` entry class and a `Session`. Malevolent Shrine is open; the other three are closed.
 - `origins/jujutsukaisen/techniques/{fuga,red,blue,purple,piercingblood,worldslash}` — technique implementations, cast through `/ability 1..3`.
-- `origins/minecraft/weapons/{dashsword,executionsword,mace}/` — Minecraft-origin weapons (dash sword, Executioner sword, Momentum mace); `MinecraftAbilities.register(...)` assembles and registers them at enable.
+- `origins/minecraft/weapons/{dashsword,executionsword,mace}/` — Minecraft-origin weapons (dash sword, Executioner axe, Momentum mace); `MinecraftAbilities.register(...)` assembles and registers them at enable.
 - `battleground/` — arena mode, economy, combat, GUI (InventoryFramework), player stores. `listeners/` and `resourcepack/` hold event wiring and the bundled, self-hosted client pack.
 - All per-domain state lives as fields in that domain's `Session` — no global maps.
 
