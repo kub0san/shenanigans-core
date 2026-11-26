@@ -137,13 +137,15 @@ class ShopCatalogSeedTest {
     private static final String EXECUTIONER_ID = "minecraft:executioners_sword";
 
     private static ShopEntry seededExecutioner(int price) {
-        return ShopEntry.customItem(EXECUTIONER_ID, Material.NETHERITE_SWORD, "Executioner's Sword",
-                price, EXECUTIONER_ID, Map.of("type", "NETHERITE_SWORD"));
+        return ShopEntry.customItem(EXECUTIONER_ID, Material.NETHERITE_AXE, "Executioner's Axe",
+                price, EXECUTIONER_ID, Map.of("type", "NETHERITE_AXE"));
     }
 
+    // Pre-rename persisted row: the display name and material are deliberately stale, only the
+    // legacy id and payload are what the one-time migration is meant to rewrite.
     private static ShopEntry staleExecutioner(int price) {
         return ShopEntry.customItem("minecraft:executioner_sword", Material.NETHERITE_SWORD,
-                "Executioner's Sword", price, "minecraft:executioner_sword",
+                "Legacy Executioner", price, "minecraft:executioner_sword",
                 Map.of("type", "OLD_STAMP"));
     }
 
@@ -156,7 +158,7 @@ class ShopCatalogSeedTest {
         ShopEntry migrated = entries.get(0);
         assertEquals(EXECUTIONER_ID, migrated.id());
         assertEquals(EXECUTIONER_ID, migrated.abilityId());
-        assertEquals(Map.of("type", "NETHERITE_SWORD"), migrated.itemData(),
+        assertEquals(Map.of("type", "NETHERITE_AXE"), migrated.itemData(),
                 "the stamp must be refreshed so old rows stop resolving to an unregistered ability");
     }
 

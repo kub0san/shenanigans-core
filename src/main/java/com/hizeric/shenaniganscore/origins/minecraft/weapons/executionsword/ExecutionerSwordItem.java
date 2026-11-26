@@ -16,8 +16,8 @@ import java.util.List;
 import static com.hizeric.shenaniganscore.core.config.AbilityTuningConfig.Section.ITEMS;
 
 /**
- * The Executioner's Sword custom item: a netherite blade whose ability is triggered by
- * {@code /ability 1} while holding it. Casting arms the next landed sword hit, which is
+ * The Executioner's Axe custom item: a netherite axe whose ability is triggered by
+ * {@code /ability 1} while holding it. Casting arms the next landed axe hit, which is
  * resolved as either a heavy uppercut (target above {@link #EXECUTE_THRESHOLD} HP) or a
  * guaranteed-kill execution (target at or below the threshold).
  */
@@ -26,12 +26,19 @@ public final class ExecutionerSwordItem {
     /** Catalog entry id, also the persistent-data value stamped on the item. */
     public static final String ID = ExecutionerSwordId.NEW_ID;
 
-    public static final String DISPLAY_NAME = "Executioner's Sword";
+    public static final String DISPLAY_NAME = "Executioner's Axe";
 
     /** Catalogue price in credits. */
     public static final int PRICE = 500;
-    /** Shipped executioner cooldown; the live value comes from {@code abilities.items.executioners-sword.cooldown}. */
+    /**
+     * Shipped executioner cooldown; the live value comes from
+     * {@code abilities.items.executioners-sword.cooldown}, falling back to
+     * {@code abilities.items.executioners-axe.cooldown} only when the old key is absent.
+     */
     public static final int DEFAULT_COOLDOWN_SECONDS = 90;
+
+    /** Sentinel for "no tuning value present"; cooldowns are clamped to 1..3600. */
+    private static final int NO_CONFIG_VALUE = -1;
 
     public static final AbilityId ABILITY_ID = AbilityId.of("minecraft:executioners_sword");
 
@@ -52,7 +59,12 @@ public final class ExecutionerSwordItem {
 
     /** Live executioner cooldown in seconds, swapped by {@code /bg reload}. */
     public static int cooldownSeconds() {
-        return AbilityTuningConfig.current().cooldown(ITEMS, "executioners-sword", DEFAULT_COOLDOWN_SECONDS);
+        AbilityTuningConfig config = AbilityTuningConfig.current();
+        int cooldown = config.cooldown(ITEMS, "executioners-sword", NO_CONFIG_VALUE);
+        if (cooldown == NO_CONFIG_VALUE) {
+            cooldown = config.cooldown(ITEMS, "executioners-axe", DEFAULT_COOLDOWN_SECONDS);
+        }
+        return cooldown;
     }
 
     /** Raw MiniMessage lore lines, exposed so tuning can be asserted without a Bukkit server. */
@@ -60,16 +72,16 @@ public final class ExecutionerSwordItem {
         return List.of(
                 "<gray>Heavy uppercut above 3 hearts.",
                 "",
-                "<dark_gray>Slot 1 <dark_gray>» <white>Executioner's Sword <dark_gray>| <gray>" + cooldownSeconds() + "s cooldown",
+                "<dark_gray>Slot 1 <dark_gray>» <white>Executioner's Axe <dark_gray>| <gray>" + cooldownSeconds() + "s cooldown",
                 "<dark_gray>Below 3 hearts <dark_gray>» <white>Final Verdict");
     }
 
     public static ItemStack build() {
-        ItemStack stack = new ItemStack(Material.NETHERITE_SWORD);
+        ItemStack stack = new ItemStack(Material.NETHERITE_AXE);
         ItemMeta meta = stack.getItemMeta();
         if (meta == null) return stack;
 
-        meta.displayName(MM.deserialize("<dark_red><bold>Executioner's Sword"));
+        meta.displayName(MM.deserialize("<dark_red><bold>Executioner's Axe"));
         meta.lore(lore().stream().map(ExecutionerSwordItem::mini).toList());
 
         meta.addEnchant(Enchantment.SHARPNESS, SHARPNESS_LEVEL, true);
@@ -86,7 +98,7 @@ public final class ExecutionerSwordItem {
     public static ShopEntry catalogEntry() {
         return ShopEntry.customItem(
                 ID,
-                Material.NETHERITE_SWORD,
+                Material.NETHERITE_AXE,
                 DISPLAY_NAME,
                 PRICE,
                 ABILITY_ID.toString(),

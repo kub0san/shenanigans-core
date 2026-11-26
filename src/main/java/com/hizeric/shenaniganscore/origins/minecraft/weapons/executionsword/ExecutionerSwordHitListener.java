@@ -1,7 +1,9 @@
 package com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword;
 
 import com.hizeric.shenaniganscore.core.sound.SoundUtils;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.title.Title;
 import org.bukkit.Sound;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -13,12 +15,13 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Arms the next landed Executioner's Sword hit and dispatches the variant (uppercut vs
+ * Arms the next landed Executioner's Axe hit and dispatches the variant (uppercut vs
  * execution) based on the target's health at contact.
  *
  * <p>Unlike {@code DashSwordHitListener}, this listener does NOT refund cooldowns; the
@@ -38,10 +41,11 @@ public final class ExecutionerSwordHitListener implements Listener {
         armedUntil.put(player.getUniqueId(), System.currentTimeMillis() + ARM_DURATION_MS);
         SoundUtils.play(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.6f, 1.2f);
         // Arming is otherwise invisible: without this, both /ability 1 and /bg debug ability
-        // look like no-ops until the player happens to land a hit. Sent to the action bar so
-        // repeated debug casts do not spam chat.
-        player.sendActionBar(MM.deserialize(
-                "<dark_red><bold>EXECUTIONER'S SWORD ARMED <gray>- strike within 6s"));
+        // look like no-ops until the player happens to land a hit. Subtitle-only so repeated
+        // debug casts neither spam chat nor steal the single action-bar slot.
+        player.showTitle(Title.title(Component.empty(),
+                MM.deserialize("<dark_red><bold>EXECUTIONER'S AXE ARMED <gray>- strike within 6s"),
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(1200), Duration.ofMillis(200))));
     }
 
     public boolean isArmed(Player player) {
