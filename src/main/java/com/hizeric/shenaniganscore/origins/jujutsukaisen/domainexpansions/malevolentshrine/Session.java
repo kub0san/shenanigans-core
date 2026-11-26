@@ -105,6 +105,8 @@ public class Session extends DomainSession {
     public final Set<UUID> warned = new HashSet<>();
     /** Cleave escalation per victim (RAVAGE level). Cleared on close. */
     public final Map<UUID, Integer> ravageCounts = new ConcurrentHashMap<>();
+    /** Slash displays spawned for this domain; disposed on every close path. */
+    public final SlashDisplayRegistry slashDisplays = new SlashDisplayRegistry();
     /** Enemy projectiles/TNT stalked by Dismantle before the delayed final cut. */
     public final Map<UUID, Dismantle.TrackedCut> trackedProjectileCuts = new ConcurrentHashMap<>();
 
@@ -147,8 +149,11 @@ public class Session extends DomainSession {
     private final int[] lastStep = new int[24];
     private final List<Double> ripples = new ArrayList<>();
 
+    /** A viewer rotation sampled from a decaying shake at a point in time. */
+    record Rotation(float yaw, float pitch) { }
+
     /** One active camera shake for a viewer. Oscillates around a fixed base rotation and decays. */
-    private static final class Shake {
+    static final class Shake {
         final float baseYaw;
         final float basePitch;
         final double amplitude;   // degrees at t = 0
@@ -156,11 +161,48 @@ public class Session extends DomainSession {
         final long durationMs;
 
         Shake(float baseYaw, float basePitch, double amplitude, long durationMs) {
+            this(baseYaw, basePitch, amplitude, System.currentTimeMillis(), durationMs);
+        }
+
+        /** Explicit clock variant: lets the curve be tested without waiting on a real timer. */
+        Shake(float baseYaw, float basePitch, double amplitude, long startMs, long durationMs) {
             this.baseYaw = baseYaw;
             this.basePitch = basePitch;
             this.amplitude = amplitude;
-            this.startMs = System.currentTimeMillis();
+            this.startMs = startMs;
             this.durationMs = Math.max(1L, durationMs);
+        }
+
+        /**
+         * Combines an already-registered shake with a new one without losing the
+         * original base. The newest registration drives amplitude, start and
+         * duration; an already-expired active shake contributes nothing, so the
+         * incoming base wins in that case.
+         */
+        static Shake layer(Shake active, Shake incoming) {
+            if (active == null) return incoming;
+            long elapsedSinceActiveStart = incoming.startMs - active.startMs;
+            if (elapsedSinceActiveStart >= active.durationMs) return incoming;
+            return new Shake(active.baseYaw, active.basePitch, incoming.amplitude,
+                    incoming.startMs, incoming.durationMs);
+        }
+
+        /**
+         * Rotation at {@code now}: a decaying sine around the recorded base,
+         * landing exactly back on that base once the shake has expired. Pitch
+         * is clamped to the legal ±89° range.
+         */
+        Rotation rotationAt(long now) {
+            long elapsed = Math.max(0L, now - startMs);
+            if (elapsed >= durationMs) {
+                return new Rotation(baseYaw, basePitch);
+            }
+            double progress = elapsed / (double) durationMs;
+            double decay = Math.pow(1.0 - progress, 1.5); // hard at the start, feathered at the end
+            double yawOffset = Math.sin(elapsed * 0.021) * amplitude * decay;
+            double pitchOffset = Math.sin(elapsed * 0.026 + 1.4) * amplitude * 0.65 * decay;
+            float pitch = (float) Math.max(-89.0, Math.min(89.0, basePitch + pitchOffset));
+            return new Rotation(baseYaw + (float) yawOffset, pitch);
         }
     }
 
@@ -542,8 +584,7 @@ public class Session extends DomainSession {
             Location feet = p.getLocation();
 
             // Decaying sinusoidal wobble around the pre-shake rotation (no drift, no snap)
-            shakes.put(p.getUniqueId(),
-                    new Shake(feet.getYaw(), feet.getPitch(), amplitude * scale, durationMs));
+            registerShake(p, new Shake(feet.getYaw(), feet.getPitch(), amplitude * scale, durationMs));
 
             if (p.isOnGround() && p.getVehicle() == null) {
                 p.setVelocity(p.getVelocity().add(new Vector(0, 0.055 * scale, 0)));
@@ -556,6 +597,22 @@ public class Session extends DomainSession {
             world.spawnParticle(Particle.POOF, feet.clone().add(0, 0.15, 0), 4,
                     0.8, 0.08, 0.8, 0.01);
         }
+    }
+
+    /** Registers a shake without dropping the base of one that is still active. */
+    private void registerShake(Player player, Shake incoming) {
+        shakes.compute(player.getUniqueId(), (ignored, active) -> Shake.layer(active, incoming));
+    }
+
+    /**
+     * Registers a session-owned rotation jitter for one player. Their current
+     * facing becomes the shake's base, so the per-tick driver restores it
+     * exactly at expiry — and {@link #close()} restores it if the domain ends
+     * mid-shake.
+     */
+    void jitter(Player player, double amplitude, long durationMs) {
+        registerShake(player, new Shake(player.getLocation().getYaw(),
+                player.getLocation().getPitch(), amplitude, System.currentTimeMillis(), durationMs));
     }
 
     /** Per-tick driver for {@link Shake}s. Cheap no-op while nothing is shaking. */
@@ -579,12 +636,8 @@ public class Session extends DomainSession {
                 it.remove();
                 continue;
             }
-            double progress = elapsed / (double) s.durationMs;
-            double decay = Math.pow(1.0 - progress, 1.5); // hard at the start, feathered at the end
-            double yawOffset = Math.sin(elapsed * 0.021) * s.amplitude * decay;
-            double pitchOffset = Math.sin(elapsed * 0.026 + 1.4) * s.amplitude * 0.65 * decay;
-            float pitch = (float) Math.max(-89.0, Math.min(89.0, s.basePitch + pitchOffset));
-            p.setRotation(s.baseYaw + (float) yawOffset, pitch);
+            Rotation rotation = s.rotationAt(now);
+            p.setRotation(rotation.yaw(), rotation.pitch());
         }
     }
 
@@ -845,7 +898,7 @@ public class Session extends DomainSession {
                     (rnd.nextDouble() - 0.5) * 10.0,
                     0.8 + rnd.nextDouble() * 1.4,
                     (rnd.nextDouble() - 0.5) * 10.0);
-            Slashes.flurry(around, 1, 10.0 + rnd.nextDouble() * 4.0);
+            Slashes.flurry(slashDisplays, around, 1, 10.0 + rnd.nextDouble() * 4.0);
         }
     }
 
@@ -1019,6 +1072,10 @@ public class Session extends DomainSession {
             if (p != null && p.isOnline()) OpenBarrier.resetSky(p);
         }
         skyPlayers.clear();
+
+        // Slashes self-remove, but delayed RAVAGE stages can still be in flight
+        // when a forced close ends the domain: drop every owned display.
+        slashDisplays.dispose();
 
         // Remove every display entity
         for (Entity e : spawnedDisplays) {

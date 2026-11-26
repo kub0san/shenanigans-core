@@ -425,7 +425,8 @@ public final class PiercingBloodBuilder {
         Vector up = right.clone().crossProduct(fwd).normalize();
 
         Location m = eye.clone().add(fwd.clone().multiply(1.5)).subtract(up.clone().multiply(0.38));
-        rig.muzzle = m.clone().add(fwd.clone().multiply(0.85));
+        // Hands stay below the crosshair, but the beam leaves from a point on the ray itself.
+        rig.muzzle = PiercingBloodAim.beamMuzzle(eye, fwd);
 
         double f = 1.0 - t / (double) PiercingBloodShot.CLAP_TICKS;
         poseHands(rig, m, fwd, right, up, 0.55 * f, 0.0);

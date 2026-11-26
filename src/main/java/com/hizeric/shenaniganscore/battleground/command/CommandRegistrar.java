@@ -32,10 +32,11 @@ public final class CommandRegistrar {
     private LiteralCommandNode<CommandSourceStack> build(CommandNode node, String inheritedPermission) {
         String permission = node.permission() != null ? node.permission() : inheritedPermission;
         LiteralArgumentBuilder<CommandSourceStack> builder = Commands.literal(node.name());
-        if (permission != null) {
-            String required = permission;
-            builder.requires(source -> source.getSender().hasPermission(required));
-        }
+        // Permission is checked in each executor, never with Brigadier's requires(): requires() prunes
+        // the node for unpermitted senders, so the handler never runs and they get a syntax error
+        // instead of feedback. Trade-off: admin literals are now visible/parseable to everyone, but
+        // execution is denied with a clear message. Do not hide them with another pruning mechanism.
+        CommandPermissionGate gate = new CommandPermissionGate(permission);
 
         if (node.arg() != CommandNode.Arg.NONE) {
             String token = node.argName();
@@ -60,6 +61,7 @@ public final class CommandRegistrar {
                     });
                 }
                 argumentBuilder2.executes(context -> {
+                    if (!gate.allows(context.getSource().getSender())) return Command.SINGLE_SUCCESS;
                     // Integer arguments are parsed once, here, by Brigadier; the parsed value
                     // travels with the context instead of being re-parsed in the handler.
                     Integer typed2 = parseInteger(context, token2, node.arg2());
@@ -72,6 +74,7 @@ public final class CommandRegistrar {
                 argumentBuilder.then(argumentBuilder2);
             } else {
                 argumentBuilder.executes(context -> {
+                    if (!gate.allows(context.getSource().getSender())) return Command.SINGLE_SUCCESS;
                     String value = read(context, token, node.arg());
                     argHandler.accept(CommandContext.of(context.getSource(), value));
                     return Command.SINGLE_SUCCESS;
@@ -83,6 +86,7 @@ public final class CommandRegistrar {
         if (node.handler() != null) {
             Consumer<CommandContext> handler = node.handler();
             builder.executes(context -> {
+                if (!gate.allows(context.getSource().getSender())) return Command.SINGLE_SUCCESS;
                 handler.accept(CommandContext.of(context.getSource()));
                 return Command.SINGLE_SUCCESS;
             });

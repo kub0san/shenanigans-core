@@ -61,6 +61,12 @@ public final class Slashes {
      * @param life      total lifetime in ticks (min ~5)
      */
     public static void blade(Location loc, float length, float yaw, float pitch, float thickness, int life) {
+        blade(null, loc, length, yaw, pitch, thickness, life);
+    }
+
+    /** Blade variant whose two display halves are registered to a session owner. */
+    static void blade(SlashDisplayRegistry owner, Location loc, float length, float yaw, float pitch,
+                      float thickness, int life) {
         World w = loc.getWorld();
         if (w == null) return;
 
@@ -68,6 +74,8 @@ public final class Slashes {
         final float endYaw = yaw + sweep;
         final BlockDisplay core = spawnBlock(loc, CORE, thickness, thickness, 0.05f, yaw - sweep, pitch);
         final BlockDisplay glow = spawnBlock(loc, GLOW, thickness * 5f, thickness * 5f, 0.05f, yaw - sweep, pitch);
+        own(owner, core);
+        own(owner, glow);
 
         new BukkitRunnable() {
             int t = 0;
@@ -129,6 +137,11 @@ public final class Slashes {
         }.runTaskTimer(ShenanigansCore.getInstance(), 0L, 2L);
     }
 
+    private static void own(SlashDisplayRegistry owner, BlockDisplay display) {
+        if (owner == null || display == null) return;
+        owner.own(display, BlockDisplay::isValid, BlockDisplay::remove);
+    }
+
     private static BlockDisplay spawnBlock(Location loc, BlockData data, float sx, float sy, float sz, float yaw, float pitch) {
         return loc.getWorld().spawn(loc, BlockDisplay.class, d -> {
             d.setBlock(data);
@@ -162,6 +175,11 @@ public final class Slashes {
      */
     public static void overshootBlade(Location victim, float yaw, float pitch,
                                       float baseLength, float thickness) {
+        overshootBlade(null, victim, yaw, pitch, baseLength, thickness);
+    }
+
+    static void overshootBlade(SlashDisplayRegistry owner, Location victim, float yaw, float pitch,
+                               float baseLength, float thickness) {
         World w = victim.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -182,13 +200,17 @@ public final class Slashes {
                 .add(dir.clone().multiply(push))
                 .add(side.clone().multiply(lateral))
                 .add(0, (r.nextDouble() - 0.5) * 0.35, 0);
-        blade(centre, len, yaw + (r.nextFloat() - 0.5f) * 14f, flatPitch, thick, life);
+        blade(owner, centre, len, yaw + (r.nextFloat() - 0.5f) * 14f, flatPitch, thick, life);
     }
 
     /**
      * A sparse, wide rake: 1–2 long horizontal blades spaced far apart.
      */
     public static void rake(Location victim, float yaw, float pitch, float baseLength) {
+        rake(null, victim, yaw, pitch, baseLength);
+    }
+
+    static void rake(SlashDisplayRegistry owner, Location victim, float yaw, float pitch, float baseLength) {
         World w = victim.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -204,7 +226,7 @@ public final class Slashes {
                     .add(side.clone().multiply(off))
                     .add(0, (r.nextDouble() - 0.5) * 0.3, 0);
             float len = baseLength * (2.4f + r.nextFloat() * 1.4f);
-            blade(c, len, yaw + (r.nextFloat() - 0.5f) * 10f,
+            blade(owner, c, len, yaw + (r.nextFloat() - 0.5f) * 10f,
                     flatPitch + (r.nextFloat() - 0.5f) * 16f,
                     0.055f + r.nextFloat() * 0.025f, 8 + r.nextInt(4));
         }
@@ -219,6 +241,10 @@ public final class Slashes {
      * victim, with a restrained blood burst.
      */
     public static void cross(Location loc, float size) {
+        cross(null, loc, size);
+    }
+
+    static void cross(SlashDisplayRegistry owner, Location loc, float size) {
         World w = loc.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -227,7 +253,7 @@ public final class Slashes {
         for (int k = 0; k < blades; k++) {
             float bYaw = yaw + k * 90f + r.nextFloat(-18f, 18f);
             float bPitch = (r.nextFloat() - 0.5f) * 24f; // mostly horizontal
-            overshootBlade(loc, bYaw, bPitch, size, 0.062f + r.nextFloat(0f, 0.018f));
+            overshootBlade(owner, loc, bYaw, bPitch, size, 0.062f + r.nextFloat(0f, 0.018f));
         }
 
         w.spawnParticle(Particle.DUST, loc, 12, 0.35, 0.30, 0.35, 0, BLOOD);
@@ -238,6 +264,10 @@ public final class Slashes {
 
     /** Sparse ambient dismantle: a few long, mostly horizontal cuts spread far apart. */
     public static void flurry(Location center, int count, double spread) {
+        flurry(null, center, count, spread);
+    }
+
+    static void flurry(SlashDisplayRegistry owner, Location center, int count, double spread) {
         ThreadLocalRandom r = ThreadLocalRandom.current();
         int n = Math.max(1, Math.min(count, 2));
         for (int i = 0; i < n; i++) {
@@ -247,7 +277,7 @@ public final class Slashes {
                     (r.nextDouble() - 0.5) * spread * 2.6);
             float yaw = r.nextFloat() * 360f;
             float pitch = (r.nextFloat() - 0.5f) * 22f; // horizontal bias
-            blade(l,
+            blade(owner, l,
                     7.5f + r.nextFloat() * 9.0f,
                     yaw,
                     pitch,
@@ -304,6 +334,10 @@ public final class Slashes {
      * A long, sweeping lash from the shrine mouth through the victim and far beyond.
      */
     public static void lash(Location from, Location to, float thickness) {
+        lash(null, from, to, thickness);
+    }
+
+    static void lash(SlashDisplayRegistry owner, Location from, Location to, float thickness) {
         World w = to.getWorld();
         if (w == null || from.getWorld() != to.getWorld()) return;
         Vector delta = to.toVector().subtract(from.toVector());
@@ -321,7 +355,7 @@ public final class Slashes {
         Location centre = from.clone().add(dir.clone().multiply(total * 0.5));
         float len = (float) Math.max(3.0, total);
         float thick = thickness * (0.85f + r.nextFloat() * 0.45f);
-        blade(centre, len, yaw, flatPitch, thick, 9 + r.nextInt(4));
+        blade(owner, centre, len, yaw, flatPitch, thick, 9 + r.nextInt(4));
         w.spawnParticle(Particle.DUST, to, 5, 0.18, 0.22, 0.18, 0, EMBER);
         Location tip = to.clone().add(dir.clone().multiply(overshoot));
         w.spawnParticle(Particle.DUST, tip, 5, 0.18, 0.12, 0.18, 0, SPARK);
@@ -332,6 +366,10 @@ public final class Slashes {
      * Sparse orbit of long, mostly horizontal blades circling the victim.
      */
     public static void helix(Location center, int count, double radius, float size) {
+        helix(null, center, count, radius, size);
+    }
+
+    static void helix(SlashDisplayRegistry owner, Location center, int count, double radius, float size) {
         World w = center.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -347,7 +385,7 @@ public final class Slashes {
             float yaw = baseYaw + i * (360f / n) + r.nextFloat(20f, 55f);
             float pitch = (r.nextFloat() - 0.5f) * 26f; // mostly horizontal
             float len = size * (2.4f + r.nextFloat() * 1.6f);
-            blade(p, len, yaw, pitch, 0.055f + r.nextFloat(0f, 0.02f), 8 + r.nextInt(4));
+            blade(owner, p, len, yaw, pitch, 0.055f + r.nextFloat(0f, 0.02f), 8 + r.nextInt(4));
         }
         w.spawnParticle(Particle.DUST, center, 6, radius * 0.7, 0.4, radius * 0.7, 0, BLOOD);
     }
@@ -356,6 +394,10 @@ public final class Slashes {
      * Sparse inward cuts: a few long, mostly horizontal blades closing from afar.
      */
     public static void implosion(Location center, int count, double startRadius, float size) {
+        implosion(null, center, count, startRadius, size);
+    }
+
+    static void implosion(SlashDisplayRegistry owner, Location center, int count, double startRadius, float size) {
         World w = center.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -374,6 +416,8 @@ public final class Slashes {
             final float len = size * (2.2f + r.nextFloat() * 1.0f);
             final BlockDisplay core = spawnBlock(start, CORE, 0.06f, 0.06f, len, inwardYaw, pitch);
             final BlockDisplay glow = spawnBlock(start, GLOW, 0.28f, 0.28f, len * 0.9f, inwardYaw, pitch);
+            own(owner, core);
+            own(owner, glow);
             final Location dest = center.clone().add(0, 0.1, 0);
             long born = System.currentTimeMillis();
             new BukkitRunnable() {
@@ -419,6 +463,16 @@ public final class Slashes {
      * @param delayMs per-victim stagger so cuts never land in lockstep
      */
     public static void ravage(Location mouth, Location victim, int level, long delayMs) {
+        ravage(null, null, mouth, victim, level, delayMs);
+    }
+
+    /**
+     * RAVAGE tied to its owning shrine session. The liveness check stops any
+     * remaining stage from spawning displays into a domain that has closed, and
+     * every stage registers its blades with the session's slash registry.
+     */
+    static void ravage(Session session, SlashDisplayRegistry owner, Location mouth, Location victim,
+                       int level, long delayMs) {
         World w = victim.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
@@ -432,40 +486,44 @@ public final class Slashes {
 
             @Override
             public void run() {
-                long el = System.currentTimeMillis() - start;
-                if (el >= 900L) { cancel(); return; }
+                long elapsed = System.currentTimeMillis() - start;
+                if (!ShrineSessionDecision.shouldKeepRavageRunnable(session == null || session.isActive(), elapsed)) {
+                    cancel();
+                    return;
+                }
+                long el = elapsed;
                 if (el < 0) return; // still waiting for this victim's stagger
 
                 if (!sHelix && el >= 120L) {
                     sHelix = true;
                     int blades = 2 + (lvl >= 7 ? 1 : 0);
                     float helixLen = 8.0f + lvl * 0.7f + r.nextFloat(0f, 2.5f);
-                    helix(victim, blades, 1.9 + r.nextDouble(0f, 0.8f), helixLen);
+                    helix(owner, victim, blades, 1.9 + r.nextDouble(0f, 0.8f), helixLen);
                     w.playSound(victim, org.bukkit.Sound.ENTITY_PLAYER_ATTACK_SWEEP, 1.25f, 0.85f + r.nextFloat() * 0.2f);
                     w.spawnParticle(Particle.CRIT, victim, 6 + lvl / 2, 0.5, 0.45, 0.5, 0.12);
                 }
                 if (!sLash && el >= 340L) {
                     sLash = true;
                     if (mouth != null && mouth.getWorld() == w) {
-                        lash(mouth, victim, 0.078f);
+                        lash(owner, mouth, victim, 0.078f);
                     } else {
-                        overshootBlade(victim, r.nextFloat() * 360f, (r.nextFloat() - 0.5f) * 18f, 9.0f, 0.072f);
+                        overshootBlade(owner, victim, r.nextFloat() * 360f, (r.nextFloat() - 0.5f) * 18f, 9.0f, 0.072f);
                     }
                     w.playSound(victim, org.bukkit.Sound.ITEM_TRIDENT_THUNDER, 1.2f, 1.35f);
                     w.spawnParticle(Particle.SWEEP_ATTACK, victim, 1, 0.12, 0.12, 0.12, 0);
                 }
                 if (!sImplode && el >= 560L) {
                     sImplode = true;
-                    implosion(victim, 2 + (lvl >= 8 ? 1 : 0), 3.0 + r.nextDouble() * 0.8, 5.0f);
+                    implosion(owner, victim, 2 + (lvl >= 8 ? 1 : 0), 3.0 + r.nextDouble() * 0.8, 5.0f);
                     w.playSound(victim, org.bukkit.Sound.ENTITY_WARDEN_SONIC_BOOM, 0.95f, 0.7f);
                     w.spawnParticle(Particle.DUST, victim, 10, 0.5, 0.45, 0.5, 0, BLOOD);
                 }
                 if (!sMega && el >= 760L) {
                     sMega = true;
                     float mega = 10.5f + lvl * 0.9f + r.nextFloat(0f, 3.0f);
-                    cross(victim, mega);
+                    cross(owner, victim, mega);
                     if (r.nextInt(3) == 0) {
-                        rake(victim, r.nextFloat() * 360f, (r.nextFloat() - 0.5f) * 20f, 7.0f + r.nextFloat(0f, 2.5f));
+                        rake(owner, victim, r.nextFloat() * 360f, (r.nextFloat() - 0.5f) * 20f, 7.0f + r.nextFloat(0f, 2.5f));
                     }
                     w.spawnParticle(Particle.DAMAGE_INDICATOR, victim, 5 + lvl / 2, 0.3, 0.35, 0.3, 0.4);
                     w.spawnParticle(Particle.DUST, victim, 14 + lvl, 0.45, 0.45, 0.45, 0, BLOOD);
@@ -485,12 +543,16 @@ public final class Slashes {
 
     /** Light, damage-free micro-cuts between the main Cleave pulses. */
     public static void microCut(Location victim) {
+        microCut(null, victim);
+    }
+
+    static void microCut(SlashDisplayRegistry owner, Location victim) {
         World w = victim.getWorld();
         if (w == null) return;
         ThreadLocalRandom r = ThreadLocalRandom.current();
         float yaw = r.nextFloat() * 360f;
         float pitch = (r.nextFloat() - 0.5f) * 20f; // mostly horizontal
-        overshootBlade(victim.clone().add(0, 0.45 + r.nextDouble() * 0.4, 0), yaw, pitch, 6.5f, 0.048f);
+        overshootBlade(owner, victim.clone().add(0, 0.45 + r.nextDouble() * 0.4, 0), yaw, pitch, 6.5f, 0.048f);
         w.spawnParticle(Particle.DUST, victim, 3, 0.20, 0.25, 0.20, 0, BLOOD);
     }
 }

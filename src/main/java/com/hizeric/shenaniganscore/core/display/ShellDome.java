@@ -28,11 +28,12 @@ import com.hizeric.shenaniganscore.core.util.MathUtil;
  * continuous wall instead of two separate effects. It is deliberately cinema,
  * not a fake wall: gaps are acceptable, the silhouette is what matters. It costs a few
  * hundred displays, once per domain, instead of tens of thousands of fake
- * block packets.</p>
+ * block packets. The plate plan is computed once; the entities themselves are
+ * spawned in small batches across successive ticks so one tick never creates
+ * the whole dome.</p>
  *
- * <p>Main-thread only. Spawning is heavy enough to not want per-tick rebirth;
- * call {@link #show()} / {@link #hide()} for visibility and {@link #close()}
- * once the domain is over.</p>
+ * <p>Main-thread only. Call {@link #show()} / {@link #hide()} for visibility and
+ * {@link #close()} once the domain is over.</p>
  */
 public final class ShellDome {
 
@@ -44,16 +45,21 @@ public final class ShellDome {
     private static final int MIN_PLATES_PER_RING = 14;
     private static final int TOTAL_PLATE_BUDGET = 280;
 
+    private static final Vector3f TINY_SCALE = new Vector3f(0.01f, 0.01f, 0.01f);
+    private static final Quaternionf NO_ROTATION = new Quaternionf();
+    private static final Vector3f PIVOT = new Vector3f(0.5f, 0.5f, 0.5f);
+
     private final World world;
-    private final double cx;
-    private final double cy;
-    private final double cz;
     private final double radius;
     private final Material material;
+    /** Immutable geometry plan; spawning it is spread across ticks. */
+    private final List<Plate> plan = new ArrayList<>();
     private final List<BlockDisplay> plates = new ArrayList<>();
 
-    private boolean spawned;
+    private int spawnedCount;
     private boolean shown;
+
+    private record Plate(Location at, Vector3f scale, Quaternionf rotation) { }
 
     public ShellDome(Location center, double radius, Material material) {
         Objects.requireNonNull(center, "center");
@@ -63,39 +69,47 @@ public final class ShellDome {
             throw new IllegalArgumentException("shell dome material must be a non-air block");
         }
         // Keep exact center; block-aligned rounding visibly drifts the shell.
-        this.cx = center.getX();
-        this.cy = center.getY();
-        this.cz = center.getZ();
+        double cx = center.getX();
+        double cy = center.getY();
+        double cz = center.getZ();
         this.radius = Math.max(4.0, radius);
         this.material = material;
+        buildPlan(cx, cy, cz, this.radius);
     }
 
-    /** True once the dome plates have been spawned (they may still be scaled to zero). */
+    /** True once every plate in the plan has been spawned (they may still be scaled to zero). */
     public boolean spawned() {
-        return spawned;
+        return spawnedCount >= plan.size();
     }
 
-    /** Shows the dome, spawning it first (bloom-in) if necessary. Idempotent. */
+    /**
+     * Shows the dome, spawning its next batch of plates (bloom-in) as needed.
+     * Idempotent for plates already shown; repeated calls finish the remaining
+     * batches without changing their final geometry.
+     */
     public void show() {
-        ensureSpawned();
-        if (shown) return;
+        boolean firstShow = !shown;
         shown = true;
-        Vector3f pivot = new Vector3f(0.5f, 0.5f, 0.5f);
-        for (int i = 0; i < plates.size(); i++) {
+
+        int added = spawnNextBatch();
+        if (added == 0 && !firstShow) return;
+
+        int from = firstShow ? 0 : plates.size() - added;
+        for (int i = from; i < plates.size(); i++) {
             BlockDisplay plate = plates.get(i);
             if (plate == null || !plate.isValid()) continue;
-            TransformUtils.applyTransform(plate, TARGET_SCALES.get(i), ROTATIONS.get(i), pivot, 10);
+            Plate spec = plan.get(i);
+            TransformUtils.applyTransform(plate, spec.scale(), spec.rotation(), PIVOT, 10);
         }
     }
 
     /** Hides the dome without deleting it (shrink-out). Idempotent. */
     public void hide() {
-        if (!spawned || !shown) return;
+        if (!shown) return;
         shown = false;
-        Vector3f pivot = new Vector3f(0.5f, 0.5f, 0.5f);
         for (BlockDisplay plate : plates) {
             if (plate == null || !plate.isValid()) continue;
-            TransformUtils.applyTransform(plate, new Vector3f(0.01f, 0.01f, 0.01f), new Quaternionf(), pivot, 6);
+            TransformUtils.applyTransform(plate, TINY_SCALE, NO_ROTATION, PIVOT, 6);
         }
     }
 
@@ -105,20 +119,14 @@ public final class ShellDome {
             if (plate != null && plate.isValid()) plate.remove();
         }
         plates.clear();
-        spawned = false;
+        spawnedCount = 0;
         shown = false;
     }
 
     // ── internals ──────────────────────────────────────────────────────────
 
-    private final List<Vector3f> TARGET_SCALES = new ArrayList<>();
-    private final List<Quaternionf> ROTATIONS = new ArrayList<>();
-
-    private void ensureSpawned() {
-        if (spawned) return;
-        spawned = true;
-        Vector3f pivot = new Vector3f(0.5f, 0.5f, 0.5f);
-
+    /** Computes the same plate layout the one-tick spawn used to create. */
+    private void buildPlan(double cx, double cy, double cz, double radius) {
         int budget = TOTAL_PLATE_BUDGET;
         for (double sinLat : SIN_LAT) {
             if (budget <= 0) break;
@@ -155,25 +163,31 @@ public final class ShellDome {
                         .rotateX(lean)
                         .normalize();
 
-                Vector3f scale = new Vector3f(length, height, thickness);
-                BlockDisplay plate = world.spawn(at, BlockDisplay.class, display -> {
-                    display.setBlock(material.createBlockData());
-                    display.setPersistent(false);
-                    display.setViewRange((float) Math.max(64.0, radius + 32.0));
-                    display.setBrightness(new Display.Brightness(13, 13));
-                    display.setInterpolationDelay(0);
-                    display.setInterpolationDuration(10);
-                    display.setTeleportDuration(0);
-                    // Spawn flat-shrunk so the dome can bloom in instead of popping.
-                    TransformUtils.applyTransform(display, new Vector3f(0.01f, 0.01f, 0.01f), rotation, pivot, 0);
-                });
-
-                TARGET_SCALES.add(scale);
-                ROTATIONS.add(rotation);
-                plates.add(plate);
+                plan.add(new Plate(at, new Vector3f(length, height, thickness), rotation));
             }
         }
-        // Scale up over 10 ticks on the first show().
-        shown = false;
     }
+
+    /** Materialises at most {@link ShellDomePlan#PLATES_PER_TICK} plates. */
+    private int spawnNextBatch() {
+        int count = ShellDomePlan.batch(plan.size(), spawnedCount);
+        for (int i = 0; i < count; i++) {
+            Plate spec = plan.get(spawnedCount + i);
+            BlockDisplay plate = world.spawn(spec.at(), BlockDisplay.class, display -> {
+                display.setBlock(material.createBlockData());
+                display.setPersistent(false);
+                display.setViewRange((float) Math.max(64.0, radius + 32.0));
+                display.setBrightness(new Display.Brightness(13, 13));
+                display.setInterpolationDelay(0);
+                display.setInterpolationDuration(10);
+                display.setTeleportDuration(0);
+                // Spawn flat-shrunk so the dome can bloom in instead of popping.
+                TransformUtils.applyTransform(display, TINY_SCALE, spec.rotation(), PIVOT, 0);
+            });
+            plates.add(plate);
+        }
+        spawnedCount += count;
+        return count;
+    }
+
 }

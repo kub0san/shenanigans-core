@@ -113,6 +113,13 @@ public final class DashSwordEffect {
             }
             if (!onGround) airborneOnce = true;
 
+            // A downward dash launched from the ground that never left it cannot travel; abort
+            // before any formulaic trail, echo or ribbon effects are spawned.
+            if (DashAnimation.blockedGroundStart(forward.getY(), onGround, airborneOnce)) {
+                finish();
+                return;
+            }
+
             // Velocity is re-applied every tick, so a player stuck against a wall still carries a
             // large velocity while their position barely changes. Stall detection reads position.
             double moved = current.distance(lastPosition);
@@ -123,25 +130,26 @@ public final class DashSwordEffect {
                 return;
             }
             lastPosition = current.clone();
+            double trail = DashAnimation.trailDistance(tick, FORWARD_MOMENTUM, current.distance(origin));
 
             // Gravity and knockback must not bend the locked path — including a downward dash.
             player.setVelocity(forward.clone().multiply(FORWARD_MOMENTUM));
 
             DashAnimation.Frame launchFrame = launch.get(Math.min(tick, launch.size() - 1));
-            DashAnimation.Frame trailFrame = trail.get(Math.min(tick, trail.size() - 1));
+            DashAnimation.Frame trailFrame = this.trail.get(Math.min(tick, this.trail.size() - 1));
 
             if (launchFrame.swing()) player.swingMainHand();
-            for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn);
-            for (DashAnimation.Sound sound : launchFrame.sounds()) play(sound);
+            for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn, trail);
+            for (DashAnimation.Sound sound : DashAnimation.soundsForTick(tick)) play(sound);
 
-            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn);
+            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn, trail);
             echoes.tick(tick);
             visibility.tick();
             wind.tick(tick);
             tick++;
         }
 
-        private void spawnLaunch(DashAnimation.DisplaySpawn spawn) {
+        private void spawnLaunch(DashAnimation.DisplaySpawn spawn, double trail) {
             switch (spawn.kind()) {
                 case CLEAVE_BURST -> {
                     player.getWorld().spawnParticle(Particle.SWEEP_ATTACK,
@@ -150,7 +158,7 @@ public final class DashSwordEffect {
                             spawn.count(), 0.02, 0.02, 0.02, 0.01);
                 }
                 case RIFT_RIBBON -> player.getWorld().spawnParticle(Particle.END_ROD,
-                        origin.clone().add(forward.clone().multiply(0.15 * tick)),
+                        origin.clone().add(forward.clone().multiply(0.15 * trail)),
                         spawn.count(), 0.05, 0.05, 0.05, 0.01);
                 case WIND_CHARGE -> {
                     // The beat fires on three frames, but the burst is a single launch cue.
@@ -165,10 +173,10 @@ public final class DashSwordEffect {
             }
         }
 
-        private void spawnEchoes(DashAnimation.DisplaySpawn spawn) {
+        private void spawnEchoes(DashAnimation.DisplaySpawn spawn, double trail) {
             // The trail follows the locked launch line, not the live camera or a turned head.
             Location point = echoOrigin.clone()
-                    .add(forward.clone().multiply(FORWARD_MOMENTUM * tick));
+                    .add(forward.clone().multiply(trail));
             for (int i = 0; i < spawn.count(); i++) {
                 echoes.spawn(point, launchYaw, launchPitch, tick);
                 player.getWorld().spawnParticle(Particle.CLOUD, point, 2, 0.06, 0.06, 0.06, 0.01);

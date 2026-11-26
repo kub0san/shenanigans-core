@@ -10,7 +10,20 @@ package com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.malev
  */
 final class ShrineSessionDecision {
 
+    /** Length of the delayed RAVAGE choreography in milliseconds. */
+    static final long RAVAGE_WINDOW_MS = 900L;
+
     private ShrineSessionDecision() {
+    }
+
+    /**
+     * Whether a delayed RAVAGE runnable should keep running. A domain that has
+     * ended (or is being force-closed) must not spawn new slash stages into an
+     * arena that is already restoring itself. A negative elapsed time is the
+     * per-victim stagger and is still allowed to wait.
+     */
+    static boolean shouldKeepRavageRunnable(boolean sessionActive, long elapsedMs) {
+        return sessionActive && elapsedMs < RAVAGE_WINDOW_MS;
     }
 
     /**

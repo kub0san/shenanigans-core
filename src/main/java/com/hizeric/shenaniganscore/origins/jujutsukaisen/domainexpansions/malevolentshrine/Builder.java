@@ -149,7 +149,7 @@ public final class Builder {
         double rad = Math.toRadians(s.getCasterYaw());
         return new Location(c.getWorld(),
                 c.getX() + (x * Math.cos(rad)) - (z * Math.sin(rad)),
-                c.getY() + y,
+                ShrineGeometry.groundContactY(c.getY(), y),
                 c.getZ() + (x * Math.sin(rad)) + (z * Math.cos(rad)));
     }
 

@@ -296,8 +296,7 @@ public class PiercingBloodShot extends BukkitRunnable {
         Location aimPoint = aim != null
                 ? aim.getHitPosition().toLocation(world)
                 : eye.clone().add(aimDir.clone().multiply(60.0));
-        Vector toAim = aimPoint.toVector().subtract(muzzle.toVector());
-        direction = toAim.lengthSquared() > 4.0 ? toAim.normalize() : aimDir;
+        direction = PiercingBloodAim.direction(aimDir, muzzle.toVector(), aimPoint.toVector());
 
         clearWindupSlowness();
 

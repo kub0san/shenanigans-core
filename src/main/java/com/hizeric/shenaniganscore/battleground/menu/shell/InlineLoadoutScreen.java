@@ -6,6 +6,7 @@ import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.battleground.ability.AbilityRail;
 import com.hizeric.shenaniganscore.battleground.loadout.GlobalKit;
 import com.hizeric.shenaniganscore.battleground.loadout.LoadoutCodec;
+import com.hizeric.shenaniganscore.battleground.loadout.LoadoutPolicy;
 import com.hizeric.shenaniganscore.battleground.loadout.LoadoutSwap;
 import com.hizeric.shenaniganscore.battleground.menu.base.GuiCard;
 import com.hizeric.shenaniganscore.battleground.menu.base.GuiConfirm;
@@ -248,7 +249,16 @@ public final class InlineLoadoutScreen extends GuiScreen {
             return;
         }
         p.setItemOnCursor(null);
-        current.setLayoutData(LoadoutCodec.encode(liveBoard(p)).data());
+        // Defense in depth (#65): the deploy plan sanitises authoritatively, but the editor must
+        // also refuse to persist an item that is not a kit default or an owned catalog deliverable.
+        LoadoutPolicy.Result sanitized = LoadoutPolicy.sanitize(
+                liveBoard(p), GlobalKit.kit(),
+                LoadoutPolicy.catalogLookup(plugin.getBattlegroundManager().shopCatalog()),
+                current::owns);
+        if (sanitized.replaced() > 0) {
+            plugin.getLogger().warning(LoadoutPolicy.warning(sanitized.replaced()));
+        }
+        current.setLayoutData(LoadoutCodec.encode(sanitized.slots()).data());
         plugin.getBattlegroundManager().playerStore().markDirty(p.getUniqueId());
         Map<String, Object> values = session.stagedStore().get(p.getUniqueId());
         if (values != null) values.remove(SEED_KEY);

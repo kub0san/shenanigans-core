@@ -39,7 +39,6 @@ import com.hizeric.shenaniganscore.battleground.shop.ShopPolicyConfig;
 import com.hizeric.shenaniganscore.core.domain.DomainRegistry;
 import com.hizeric.shenaniganscore.core.domain.DomainRegionGuard;
 import com.hizeric.shenaniganscore.core.terrain.DomainFloorRestoreLedger;
-import com.hizeric.shenaniganscore.core.network.DomainBlockOverlayManager;
 import com.hizeric.shenaniganscore.core.network.PacketEventsBridge;
 import com.hizeric.shenaniganscore.core.network.PacketEventsTransport;
 import com.hizeric.shenaniganscore.core.session.SessionManager;
@@ -49,7 +48,6 @@ import com.hizeric.shenaniganscore.listeners.DomainListener;
 import com.hizeric.shenaniganscore.listeners.LifecycleListener;
 import com.hizeric.shenaniganscore.battleground.player.lifecycle.PlayerLifecycleListener;
 import com.hizeric.shenaniganscore.listeners.MovementListener;
-import com.hizeric.shenaniganscore.listeners.OverlayListener;
 import com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities;
 import com.hizeric.shenaniganscore.origins.minecraft.MinecraftAbilities;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashVisibilityMask;
@@ -319,7 +317,6 @@ public final class ShenanigansCore extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new MovementListener(), this);
         getServer().getPluginManager().registerEvents(new ActionLockListener(), this);
         getServer().getPluginManager().registerEvents(new DomainRegionGuard(), this);
-        getServer().getPluginManager().registerEvents(new OverlayListener(), this);
         getServer().getPluginManager().registerEvents(new BattlegroundListener(this), this);
         if (battlegroundManager != null) {
             getServer().getPluginManager().registerEvents(
@@ -375,7 +372,7 @@ public final class ShenanigansCore extends JavaPlugin {
         // disablePlugin(), but doing it here makes the seam symmetric and guarantees no handler
         // from this instance can observe a half-torn-down plugin.
         runSafely("listeners", () -> HandlerList.unregisterAll(this));
-        // Graceful order: domains release their own blocks/overlays first, then shared
+        // Graceful order: domains release their own blocks first, then shared
         // visual systems, then a hard flag/task sweep for PlugManX-style reloads. Each
         // step is isolated so one failure cannot strand the rest of the teardown.
         runSafely("resource pack", () -> {
@@ -402,7 +399,6 @@ public final class ShenanigansCore extends JavaPlugin {
         runSafely("domains", () -> {
             if (sessionManager != null) sessionManager.stopAll();
         });
-        runSafely("domain overlays", () -> DomainBlockOverlayManager.get().shutdown());
         runSafely("client block overlays", () -> ClientBlockUtils.shutdown());
         // Client-side mannequin echoes live only in PacketEvents packets; a reload mid-dash would
         // otherwise strand them (and their glow team) on every viewer until relog.

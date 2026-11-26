@@ -6,16 +6,31 @@ package com.hizeric.shenaniganscore.battleground.arena;
  * <p>The arena is reachable only through the battleground hub, so a player with no
  * mode state has nothing to do in it. Kept free of Bukkit types so the branches can be
  * unit-tested; the listener translates the result into an event cancel.</p>
+ *
+ * <p>Issue #64 distinguishes two cases that used to collapse into one. <em>Ingress</em> (the
+ * destination is inside but the origin is not) is {@link Verdict#DENY} for everyone without a
+ * mode flag. A player who is <em>already inside</em> without a mode flag is {@link Verdict#EJECT}:
+ * the exploit should send them to the return point, not let them walk out unscathed. Deployed,
+ * staged, admin and one-shot-token players stay {@link Verdict#ALLOW} in both directions so the
+ * normal deploy/exit path is untouched.</p>
  */
 public final class ArenaEntryDecision {
 
     public enum Verdict {
         ALLOW,
-        DENY
+        DENY,
+        EJECT
     }
 
-    public record Input(boolean destinationInArena, boolean deployed, boolean staged,
-                        boolean admin, boolean internalTransit) { }
+    public record Input(boolean destinationInArena, boolean originInArena, boolean deployed,
+                        boolean staged, boolean admin, boolean internalTransit) {
+        /** Ingress-only convenience constructor: callers that have no origin flag (teleport and
+         * respawn guards) keep the original "destination is guarded" semantics. */
+        public Input(boolean destinationInArena, boolean deployed, boolean staged,
+                     boolean admin, boolean internalTransit) {
+            this(destinationInArena, false, deployed, staged, admin, internalTransit);
+        }
+    }
 
     private ArenaEntryDecision() { }
 
@@ -25,14 +40,20 @@ public final class ArenaEntryDecision {
     }
 
     /**
-     * Outside the arena there is nothing to guard. Inside, a player must be deployed,
-     * staged, an admin, or riding a one-shot token the plugin itself just issued.
+     * Fail open when neither side is guarded (or the input is null). Authorised players may be
+     * anywhere; an unauthorised origin inside the guarded volume is ejected, and an unauthorised
+     * destination inside is denied.
      */
     public static Verdict evaluate(Input input) {
-        if (input == null || !input.destinationInArena()) return Verdict.ALLOW;
-        if (input.internalTransit()) return Verdict.ALLOW;
-        if (input.admin()) return Verdict.ALLOW;
-        if (input.deployed() || input.staged()) return Verdict.ALLOW;
+        if (input == null) return Verdict.ALLOW;
+        boolean origin = input.originInArena();
+        boolean destination = input.destinationInArena();
+        if (!origin && !destination) return Verdict.ALLOW;
+
+        boolean authorised = input.internalTransit() || input.admin()
+                || input.deployed() || input.staged();
+        if (authorised) return Verdict.ALLOW;
+        if (origin) return Verdict.EJECT;
         return Verdict.DENY;
     }
 }

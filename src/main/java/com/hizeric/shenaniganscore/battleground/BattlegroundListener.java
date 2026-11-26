@@ -1,6 +1,7 @@
 package com.hizeric.shenaniganscore.battleground;
 
 import com.hizeric.shenaniganscore.battleground.BattlegroundDefaults;
+import com.hizeric.shenaniganscore.battleground.arena.ArenaEntryGuard;
 import com.hizeric.shenaniganscore.battleground.arena.ArenaRegion;
 import com.hizeric.shenaniganscore.battleground.arena.RespawnTarget;
 
@@ -127,6 +128,10 @@ public final class BattlegroundListener implements Listener {
         // PlayerLifecycleListener.onJoin -> StagingController.hideStagedFrom; duplicating that loop
         // here re-hid players and recorded duplicate viewers.
         manager().repair(event.getPlayer());
+        // Issue #64: repair clears mode flags but cannot move a body that is already standing in
+        // the arena. Sweep those stranded players to the return point with the same scheduled,
+        // deduplicated ejection the move guard uses.
+        ArenaEntryGuard.get().ejectIfStranded(event.getPlayer());
     }
 
     @EventHandler

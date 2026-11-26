@@ -44,6 +44,18 @@ public final class LoadoutPlan {
             warnings.add("layout: " + decoded.error());
         }
 
+        // Issue #65: the saved layout is untrusted player data. Keep only kit-default slots and
+        // owned, enabled, canonical catalog items; restore everything else from the live kit before
+        // this board reaches the deploy applier. One summary warning, not one per slot.
+        LoadoutPolicy.Result sanitized = LoadoutPolicy.sanitize(
+                decoded.items(), fallback,
+                LoadoutPolicy.catalogLookup(plugin.getBattlegroundManager().shopCatalog()),
+                data::owns);
+        warnings.addAll(sanitized.warnings());
+        if (sanitized.replaced() > 0) {
+            plugin.getLogger().warning(LoadoutPolicy.warning(sanitized.replaced()));
+        }
+
         AbilityRail rail = data.rail();
         boolean dirty = false;
 
@@ -80,7 +92,7 @@ public final class LoadoutPlan {
                 dirty = true;
             }
         }
-        return new Result(decoded.items(), railSnapshot(rail), dirty, warnings);
+        return new Result(sanitized.slots(), railSnapshot(rail), dirty, warnings);
     }
 
     private static boolean ownsEntry(ShenanigansCore plugin, BattlegroundPlayer data, AbilityId id) {

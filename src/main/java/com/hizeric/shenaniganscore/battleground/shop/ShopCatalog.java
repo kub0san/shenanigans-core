@@ -161,8 +161,12 @@ public final class ShopCatalog {
         return changed;
     }
 
-    /** Canonical catalogue id for a possibly-legacy custom-item id; unchanged when unknown. */
-    static String canonicalCustomItemId(String id) {
+    /**
+     * Canonical catalogue id for a possibly-legacy custom-item id; unchanged when unknown.
+     * Shared with consumers such as the loadout sanitizer so a pre-migration stamp resolves to the
+     * same enabled row the catalog itself recognises, without duplicating the id literals here.
+     */
+    public static String canonicalCustomItemId(String id) {
         if (id == null) return null;
         return MomentumMaceId.migrate(ExecutionerSwordId.migrate(DashSwordId.migrate(id)));
     }
