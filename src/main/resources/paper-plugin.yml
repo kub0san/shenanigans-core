@@ -38,6 +38,8 @@ permissions:
     description: Bypass the in-round command policy
     default: op
 
+# Paper/Leaf only; not Folia. This plugin uses the global Bukkit scheduler and
+# does not declare Folia support.
 dependencies:
   server:
     # must match PacketEvents' plugin.yml: name: packetevents (lowercase)
