@@ -3,6 +3,9 @@ package com.hizeric.shenaniganscore.battleground.menu.shell;
 import com.github.stefvanschie.inventoryframework.pane.StaticPane;
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.battleground.RoundState;
+import com.hizeric.shenaniganscore.battleground.command.AbilityCommand;
+import com.hizeric.shenaniganscore.battleground.command.BattlegroundCommand;
+import com.hizeric.shenaniganscore.battleground.command.CommandHelp;
 import com.hizeric.shenaniganscore.battleground.command.Permissions;
 import com.hizeric.shenaniganscore.battleground.menu.MenuManager;
 import com.hizeric.shenaniganscore.battleground.menu.base.GuiDock;
@@ -21,6 +24,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 
 import java.util.Arrays;
+import java.util.List;
 import com.hizeric.shenaniganscore.battleground.menu.base.screen.ScreenRegistry;
 
 /** Hub: one statistics dossier, three destinations and a live round readout. */
@@ -89,6 +93,17 @@ public final class HubScreen extends GuiScreen {
 
     @Override
     protected void renderChrome(StaticPane chrome) {
+        // Same reply shape as /bg help: the full two-root overview, sent line by line.
+        put(chrome, 7, dockRow(), GuiTheme.named(Material.PAPER, GuiTheme.accent() + "<bold>", "HELP",
+                GuiTheme.dim("List every command")),
+                (p, e) -> {
+                    GuiSounds.click(p);
+                    for (String line : CommandHelp.render(List.of(
+                            new BattlegroundCommand(plugin).root(),
+                            new AbilityCommand(plugin).root()), null)) {
+                        p.sendMessage(MM.deserialize(line));
+                    }
+                });
         GuiDock.of(this)
                 .action(8, GuiTheme.plain(Material.BARRIER, GuiTheme.RED, "LEAVE"), (p, e) -> {
                     GuiSounds.click(p);

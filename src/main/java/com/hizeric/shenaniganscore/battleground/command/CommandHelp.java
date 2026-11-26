@@ -1,5 +1,7 @@
 package com.hizeric.shenaniganscore.battleground.command;
 
+import net.kyori.adventure.text.minimessage.MiniMessage;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -21,6 +23,9 @@ public final class CommandHelp {
             if (found != null) {
                 return detail(roots, found);
             }
+            List<String> lines = new ArrayList<>(overview(roots));
+            lines.add("<red>Unknown topic: <white>" + MiniMessage.miniMessage().escapeTags(topic));
+            return lines;
         }
         return overview(roots);
     }
