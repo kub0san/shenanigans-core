@@ -36,6 +36,7 @@ public class Ability {
         return AbilityTuningConfig.current().cooldown(TECHNIQUES, "purple", DEFAULT_COOLDOWN_SECONDS);
     }
 
+    /** Sneaking at cast selects the existing remote SEND/BLAST path. */
     public static AbilityDefinition definition() {
         return new AbilityDefinition(
                 ID,
@@ -44,7 +45,7 @@ public class Ability {
                 PRICE,
                 Ability::getCooldownSeconds,
                 DEFAULT_POWER,
-                (player, power) -> perform(player, power, false),
+                (player, power) -> perform(player, power, player.isSneaking()),
                 player -> ShenanigansCore.getInstance().getSessionManager()
                         .hasActiveSession(player.getUniqueId()),
                 false
