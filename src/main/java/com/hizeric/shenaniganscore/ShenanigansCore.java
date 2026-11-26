@@ -12,8 +12,10 @@ import com.hizeric.shenaniganscore.battleground.arena.WorldEditBridge;
 import com.hizeric.shenaniganscore.battleground.arena.WorldEditSupport;
 import com.hizeric.shenaniganscore.battleground.command.AbilityCommand;
 import com.hizeric.shenaniganscore.battleground.command.BattlegroundCommand;
+import com.hizeric.shenaniganscore.battleground.command.Cmd;
 import com.hizeric.shenaniganscore.battleground.command.CommandNode;
 import com.hizeric.shenaniganscore.battleground.command.CommandRegistrar;
+import com.hizeric.shenaniganscore.battleground.command.Permissions;
 import com.hizeric.shenaniganscore.battleground.command.SetupSession;
 import com.hizeric.shenaniganscore.battleground.combat.KillCreditListener;
 import com.hizeric.shenaniganscore.battleground.indicator.IndicatorRouter;
@@ -55,6 +57,7 @@ import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.Mannequin
 import com.hizeric.shenaniganscore.resourcepack.ResourcePackManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.permissions.Permission;
 import org.bukkit.permissions.PermissionDefault;
@@ -340,7 +343,8 @@ public final class ShenanigansCore extends JavaPlugin {
         // One declarative tree per root; the same tree drives Brigadier, help and startup validation.
         List<CommandNode> roots = List.of(
                 new BattlegroundCommand(this).root(),
-                new AbilityCommand(this).root());
+                new AbilityCommand(this).root(),
+                leaveRoot(this));
 
         List<String> problems = new CommandRegistrar().validate(roots);
         if (!problems.isEmpty()) {
@@ -354,6 +358,17 @@ public final class ShenanigansCore extends JavaPlugin {
                 event.registrar().register(registrar.build(root), root.description(), root.aliases());
             }
         });
+    }
+
+    /** {@code /leave} is a separate root, not an alias, so it works outside {@code /bg} too. */
+    public static CommandNode leaveRoot(ShenanigansCore plugin) {
+        return Cmd.root("leave", "Return to the battleground hub", Permissions.USE,
+                CommandNode.Group.PLAYER)
+                .runs(ctx -> {
+                    Player p = ctx.player();
+                    if (p != null) plugin.getBattlegroundManager().leave(p);
+                })
+                .build();
     }
 
     @Override

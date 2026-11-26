@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CommandPolicyTest {
 
-    private static final List<String> ALLOWED = List.of("battleground", "bg", "ability", "ab",
+    private static final List<String> ALLOWED = List.of("battleground", "bg", "ability", "ab", "leave",
             "msg", "r", "reply", "tell", "w", "whisper");
     private static final List<String> BLOCKED = List.of("kit", "tpa", "tpahere");
 
@@ -38,6 +38,13 @@ class CommandPolicyTest {
                 CommandPolicy.Mode.BLACKLIST, ALLOWED, BLOCKED, "/tpa Steve", false)).allowed() == false);
         assertTrue(CommandPolicy.evaluate(new CommandPolicy.Input(
                 CommandPolicy.Mode.BLACKLIST, ALLOWED, BLOCKED, "/bg join", false)).allowed());
+    }
+
+    @Test
+    void whitelistAllowsTheLeaveRoot() {
+        assertTrue(CommandPolicy.evaluate(new CommandPolicy.Input(
+                CommandPolicy.Mode.WHITELIST, ALLOWED, BLOCKED, "/leave", false)).allowed());
+        assertEquals("leave", CommandPolicy.root("/leave"));
     }
 
     @Test

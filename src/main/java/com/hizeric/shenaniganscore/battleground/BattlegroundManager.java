@@ -236,6 +236,10 @@ public final class BattlegroundManager {
     public int roundNumber() { return roundNumber; }
     public long remainingSeconds() { return clock.secondsRemaining(); }
     public boolean isDeployed(UUID uuid) { return deployed != null && deployed.contains(uuid); }
+    /** Deployed in the round or staged in the hub: the two states a mode command can act on. */
+    public boolean isInside(Player player) {
+        return player != null && (isDeployed(player.getUniqueId()) || staging().isStaged(player));
+    }
     public int deployedCount() { return deployed.size(); }
     public DiveService dives() { return dives; }
     public boolean worldEditReady() { return restorer != null; }
