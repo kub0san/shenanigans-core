@@ -52,7 +52,7 @@ class BundledConfigSchemaTest {
 
         assertEquals(2.0, techniques.node("blue", "damage").getDouble(), 0.0001);
         assertEquals(18.0, techniques.node("red", "damage").getDouble(), 0.0001);
-        assertEquals(14.0, techniques.node("piercing-blood", "damage").getDouble(), 0.0001);
+        assertEquals(18.0, techniques.node("piercing-blood", "damage").getDouble(), 0.0001);
         assertEquals(24.0, techniques.node("purple", "damage").getDouble(), 0.0001);
         assertEquals(24.0, techniques.node("fuga", "damage").getDouble(), 0.0001);
 
