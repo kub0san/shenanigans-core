@@ -1,5 +1,6 @@
 package com.hizeric.shenaniganscore.battleground.command;
 
+import com.hizeric.shenaniganscore.ShenanigansCore;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -23,7 +24,8 @@ class CommandTreeTest {
 
     private static List<CommandNode> realRoots() {
         // Handlers are never invoked here, so a null plugin is safe for tree construction.
-        return List.of(new BattlegroundCommand(null).root(), new AbilityCommand(null).root());
+        return List.of(new BattlegroundCommand(null).root(), new AbilityCommand(null).root(),
+                ShenanigansCore.leaveRoot(null));
     }
 
     /** Every literal name and alias anywhere in the forest, lower-cased. */
@@ -89,6 +91,7 @@ class CommandTreeTest {
         assertTrue(names.contains("bg"), "/bg alias");
         assertTrue(names.contains("ability"));
         assertTrue(names.contains("ab"), "/ab alias");
+        assertTrue(names.contains("leave"), "/leave is its own root");
     }
 
     @Test
@@ -96,6 +99,7 @@ class CommandTreeTest {
         List<String> all = paths(realRoots());
         for (String path : List.of(
                 "/battleground help", "/battleground join", "/battleground leave",
+                "/battleground spawn",
                 "/battleground setspawn", "/battleground setup", "/battleground reload",
                 "/battleground debug ability", "/battleground debug item",
                 "/battleground credits add", "/battleground credits remove", "/battleground credits set",
@@ -142,9 +146,18 @@ class CommandTreeTest {
 
     @Test
     void playerLeavesCarryThePlayerPermission() {
-        for (String path : List.of("/battleground help", "/battleground join", "/battleground leave")) {
+        for (String path : List.of("/battleground help", "/battleground join", "/battleground leave",
+                "/battleground spawn")) {
             assertEquals(Permissions.USE, node(realRoots(), path).permission(), path);
         }
+    }
+
+    @Test
+    void leaveIsASeparateRootNotAnAlias() {
+        CommandNode leave = realRoots().stream()
+                .filter(root -> root.name().equals("leave")).findFirst().orElseThrow();
+        assertEquals(Permissions.USE, leave.permission());
+        assertTrue(leave.aliases().isEmpty(), "/leave must not be an alias of another root");
     }
 
     @Test

@@ -143,6 +143,16 @@ public final class BattlegroundListener implements Listener {
     @EventHandler
     public void onCommand(PlayerCommandPreprocessEvent event) {
         Player player = event.getPlayer();
+        // Bare /spawn is a battleground-only leave alias. Arguments, other roots and players
+        // outside the mode keep their normal command path (including the policy check below).
+        // The domain lock wins: ActionLockListener runs later and cannot undo a leave done here.
+        if (com.hizeric.shenaniganscore.battleground.combat.CommandPolicy.isExactSpawn(
+                event.getMessage()) && manager().isInside(player)
+                && !com.hizeric.shenaniganscore.core.session.Immobilize.isMovementLocked(player)) {
+            event.setCancelled(true);
+            manager().leave(player);
+            return;
+        }
         boolean inMode = BattlegroundLock.isLocked(player)
                 || manager().isDeployed(player.getUniqueId());
         if (!inMode) return;

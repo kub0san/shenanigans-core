@@ -58,6 +58,14 @@ public final class BattlegroundCommand {
                             Player p = ctx.player();
                             if (p != null) manager().leave(p);
                         }))
+                .child(Cmd.leaf("spawn", "Return to the hub from inside the battleground",
+                        Permissions.USE, CommandNode.Group.PLAYER)
+                        .runs(ctx -> {
+                            Player p = ctx.player();
+                            if (p == null) return;
+                            if (manager().isInside(p)) manager().leave(p);
+                            else ctx.reply("Only usable in the battleground.");
+                        }))
                 .child(Cmd.leaf("help", "Show this help, or help for one command", Permissions.USE, CommandNode.Group.PLAYER)
                         .runs(ctx -> ctx.reply(CommandHelp.render(List.of(this.root), null)))
                         .arg("topic", CommandNode.Arg.WORD,

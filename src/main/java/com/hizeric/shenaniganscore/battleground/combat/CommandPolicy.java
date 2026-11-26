@@ -8,7 +8,7 @@ public final class CommandPolicy {
 
     /** Narrow in-mode whitelist: the mode's own commands plus messaging. */
     public static final java.util.List<String> DEFAULT_ALLOWED_ROOTS = java.util.List.of(
-            "battleground", "bg", "ability", "ab",
+            "battleground", "bg", "ability", "ab", "leave",
             "msg", "r", "reply", "tell", "w", "whisper");
 
     /**
@@ -50,6 +50,14 @@ public final class CommandPolicy {
         int colon = root.indexOf(':');
         if (colon >= 0) root = root.substring(colon + 1);
         return root;
+    }
+
+    /** Bare {@code /spawn} only: no arguments, no other root, any casing or namespace. */
+    public static boolean isExactSpawn(String command) {
+        if (command == null) return false;
+        String text = command.trim();
+        while (text.startsWith("/")) text = text.substring(1).trim();
+        return "spawn".equals(root(command)) && text.split("\\s+").length == 1;
     }
 
     public static Decision evaluate(Input input) {
