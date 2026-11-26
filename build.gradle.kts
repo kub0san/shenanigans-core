@@ -6,6 +6,34 @@ plugins {
 group = "com.hizeric"
 version = "1.0-SNAPSHOT"
 
+// License names from the resolved POM metadata; keep in sync with THIRD_PARTY_NOTICES.md.
+val bundledLicenseNames = mapOf(
+    "configurate" to "Apache License, Version 2.0",
+    "geantyref" to "The Apache Software License, Version 2.0",
+    "IF" to "The Unlicense",
+    "HikariCP" to "The Apache Software License, Version 2.0",
+    "sqlite-jdbc" to "The Apache Software License, Version 2.0",
+)
+
+// Upstream jars mostly ship no license file. Generate a name-only notice per runtime
+// dependency so every bundled component is identifiable inside the shadow jar (#52).
+val generateThirdPartyNotices = tasks.register("generateThirdPartyNotices") {
+    val noticeDir = layout.buildDirectory.dir("generated/third-party-notices")
+    // Resolve to plain data here so the task action never captures the build script (configuration cache).
+    val notices = configurations.runtimeClasspath.get().sortedBy { it.name }.map { jar ->
+        val license = bundledLicenseNames.entries.firstOrNull { jar.name.contains(it.key) }?.value
+            ?: "See THIRD_PARTY_NOTICES.md"
+        "NOTICE-${jar.nameWithoutExtension}.txt" to "Third-party component: ${jar.name}\nLicense: $license\n"
+    }
+    inputs.files(configurations.runtimeClasspath)
+    outputs.dir(noticeDir)
+    doLast {
+        val dir = noticeDir.get().asFile
+        dir.mkdirs()
+        notices.forEach { (name, content) -> File(dir, name).writeText(content, Charsets.UTF_8) }
+    }
+}
+
 // E2E for the Paper 26.3 target is handled by Craftwire (native 26.3, MCP-callable).
 // Plugwright was removed because it stops at MC 26.1. See the E2E spec in
 // ~/.config/opencode/.planning/2026-11-22-mcp-plugin-skill-trim/e2e-spec-26.3.md.
@@ -55,6 +83,14 @@ java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
 
+val runtimeLicenseTrees = provider {
+    configurations.runtimeClasspath.get().sortedBy { it.name }.map { jar ->
+        zipTree(jar).matching {
+            include("META-INF/LICENSE*", "META-INF/NOTICE*", "LICENSE*", "**/LICENSE*", "**/NOTICE*")
+        }
+    }
+}
+
 // Build the resource pack zip from the pixel-art sources and embed it in the jar.
 val resourcePackZip = tasks.register<Zip>("resourcePackZip") {
     from("resourcepack")
@@ -71,6 +107,14 @@ tasks {
         dependsOn(shadowJar)
     }
     shadowJar {
+        // #52: bundle the license/notice resources shipped by runtime dependencies,
+        // plus one generated name-only notice per dependency (see generateThirdPartyNotices).
+        from(generateThirdPartyNotices) {
+            into("META-INF")
+        }
+        from(runtimeLicenseTrees) {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        }
         relocate("org.spongepowered.configurate", "com.hizeric.shenaniganscore.libs.configurate")
         relocate("io.leangen.geantyref", "com.hizeric.shenaniganscore.libs.geantyref")
         relocate("com.github.stefvanschie.inventoryframework", "com.hizeric.shenaniganscore.libs.if")
