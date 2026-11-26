@@ -17,7 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * floats every ground-contact prop one block above the platform.
  *
  * <p>The fix is a single pure datum seam used by {@code Builder.toWorld()}.
- * Per-prop offsets and the shared display pivot are deliberately untouched.</p>
+ * The shared display pivot is untouched; ground-contact props are seated
+ * against it in {@code ShrineGeometry} / {@code Builder}.</p>
  */
 class ShrineGeometryDatumTest {
 

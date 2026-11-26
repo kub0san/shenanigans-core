@@ -52,6 +52,26 @@ public final class Builder {
     /** Set false on weak servers: skips bone piles, fangs and relic fingers and trims horns. */
     public static final boolean HIGH_DETAIL = true;
 
+    // Ground-contact authoring, shared with ShrineGroundContactTest so the
+    // regression asserts the values actually used here.
+    static final double FOUNDATION_BASE_CENTER_Y = -1.5;
+    static final float FOUNDATION_BASE_SCALE_Y = 5f;
+    static final double PILLAR_FOOT_MIN_Y = 1.0;
+    static final double PILLAR_PLINTH_CENTER_OFFSET_Y = 0.45;
+    static final float PILLAR_PLINTH_SCALE_Y = 0.9f;
+    static final double PILLAR_SHAFT_FOOT_OFFSET_Y = 0.9;
+    static final double BULL_PEDESTAL_FOOT_BELOW_TERRAIN = -0.85;
+    static final double BULL_PEDESTAL_HEAD_DATUM_Y = 1.0;
+    static final double BONE_SKULL_CENTER_Y = 0.45;
+    static final float BONE_SKULL_SCALE_Y = 0.85f;
+    static final double BONE_JAW_CENTER_Y = 0.08;
+    static final double BONE_LONG_BONE_CENTER_Y = 0.2;
+    static final float BONE_LONG_BONE_SCALE_Y = 1.5f;
+    static final float BONE_SKULL_SCALE_XZ = 0.95f;
+    static final float BONE_LONG_BONE_SCALE_XZ = 0.3f;
+    static final float BONE_SKULL_LEAN_Z_DEGREES = 8f;
+    static final float BONE_LONG_BONE_LEAN_X_DEGREES = 78f;
+
     private static final double RISE_DEPTH = 13.0;
     private static final Map<Material, BlockData> CACHE = new EnumMap<>(Material.class);
     private static final BlockData DEBRIS = Material.BLACKSTONE.createBlockData();
@@ -320,7 +340,8 @@ public final class Builder {
     // ─────────────────────────────────────────────────────────────────────────
 
     public static void buildWave1(Session s) {
-        spawnPiece(s, Material.POLISHED_BLACKSTONE_BRICKS, 0, -1.5, 0, 21, 5, 17, 0);
+        spawnPiece(s, Material.POLISHED_BLACKSTONE_BRICKS, 0, FOUNDATION_BASE_CENTER_Y, 0,
+                21, FOUNDATION_BASE_SCALE_Y, 17, 0);
         spawnPiece(s, Material.POLISHED_BLACKSTONE, 0, 1.5, 0, 18, 1, 14, 0);
 
         // Blood-red trim along the terrace edge
@@ -366,17 +387,21 @@ public final class Builder {
             // The lower end of every support is calculated independently. On a
             // hillside the shafts become different lengths, while the capitals
             // remain on the same architectural datum and the roof stays level.
-            // The foundation top is y=1, so low ground is supported by the plinth;
-            // raised ground moves the foot upward and shortens the shaft.
-            double footY = Math.max(1.0, terrainOffsetY(s, c[0], c[1]));
+            // The foundation's top face is local y=1.5 (slab at -1.5, scale 5).
+            // A display block's bottom sits 0.5 above its authored centre, so a
+            // plinth centred at footY + 0.45 bottoms out at footY + 0.5: with
+            // footY = 1.0 it rests exactly on that foundation top. Raised ground
+            // moves the foot upward and shortens the shaft.
+            double footY = Math.max(PILLAR_FOOT_MIN_Y, terrainOffsetY(s, c[0], c[1]));
             footY = Math.min(footY, 7.15); // leave a visible shaft even on steep terrain
-            double shaftBottom = footY + 0.9;
+            double shaftBottom = footY + PILLAR_SHAFT_FOOT_OFFSET_Y;
             double shaftTop = 8.5;
             double shaftHeight = Math.max(0.35, shaftTop - shaftBottom);
             double shaftCenter = shaftBottom + shaftHeight * 0.5;
 
-            spawnPiece(s, Material.POLISHED_BLACKSTONE, c[0], footY + 0.45, c[1],
-                    1.55f, 0.9f, 1.55f, 0); // grounded plinth
+            spawnPiece(s, Material.POLISHED_BLACKSTONE, c[0],
+                    footY + PILLAR_PLINTH_CENTER_OFFSET_Y, c[1],
+                    1.55f, PILLAR_PLINTH_SCALE_Y, 1.55f, 0); // grounded plinth
             spawnPiece(s, Material.RED_NETHER_BRICKS, c[0], shaftCenter, c[1],
                     0.9f, (float) shaftHeight, 0.9f, 0); // terrain-length shaft
             spawnPiece(s, Material.DARK_OAK_PLANKS, c[0], 8.0, c[1],
@@ -719,8 +744,10 @@ public final class Builder {
         // pillar; higher ground shortens it. On a very high ridge the skull group
         // is lifted just enough to remain above the terrain.
         double terrain = terrainOffsetY(s, ox, oz);
-        double footY = terrain - 0.35;
-        double headDatumY = Math.max(1.0, terrain + 0.75);
+        // A scaled display block's bottom sits 0.5 above its authored centre,
+        // so seat the foot 0.5 lower than the intended terrain - 0.35.
+        double footY = terrain + BULL_PEDESTAL_FOOT_BELOW_TERRAIN;
+        double headDatumY = Math.max(BULL_PEDESTAL_HEAD_DATUM_Y, terrain + 0.75);
         double pedestalHeight = Math.max(0.8, headDatumY - footY);
         double pedestalCenterY = footY + pedestalHeight * 0.5;
         double headOffset = headDatumY - 1.0;
@@ -782,10 +809,17 @@ public final class Builder {
             double uz = Math.sin(yr);
 
             double rootY = terrainOffsetY(s, x, z);
-            spawnPiece(s, Material.BONE_BLOCK, x, 0.45 + rootY, z, 0.95f, 0.85f, 0.95f, yaw, 0f, 8f);
+            // Authored centres assume the bottom is centre - scale/2; display
+            // blocks pivot at 0.5, so shift each centre down by half a block.
+            spawnPiece(s, Material.BONE_BLOCK, x,
+                    ShrineGeometry.centerFromAuthoredY(BONE_SKULL_CENTER_Y + rootY), z,
+                    BONE_SKULL_SCALE_XZ, BONE_SKULL_SCALE_Y, BONE_SKULL_SCALE_XZ,
+                    yaw, 0f, BONE_SKULL_LEAN_Z_DEGREES);
             double jawX = x + fx * 0.12, jawZ = z + fz * 0.12;
-            spawnPiece(s, Material.BONE_BLOCK, jawX, 0.08 + terrainOffsetY(s, jawX, jawZ), jawZ,
-                    0.6f, 0.3f, 0.7f, yaw);
+            spawnPiece(s, Material.BONE_BLOCK, jawX,
+                    ShrineGeometry.centerFromAuthoredY(
+                            BONE_JAW_CENTER_Y + terrainOffsetY(s, jawX, jawZ)),
+                    jawZ, 0.6f, 0.3f, 0.7f, yaw);
             for (int sd = -1; sd <= 1; sd += 2) {
                 double eyeX = x + fx * 0.47 + ux * 0.22 * sd;
                 double eyeZ = z + fz * 0.47 + uz * 0.22 * sd;
@@ -799,8 +833,10 @@ public final class Builder {
                 double boneX = x + (r.nextDouble() - 0.5) * 1.8;
                 double boneZ = z + (r.nextDouble() - 0.5) * 1.8;
                 spawnPiece(s, Material.BONE_BLOCK, boneX,
-                        0.2 + terrainOffsetY(s, boneX, boneZ), boneZ,
-                        0.3f, 1.5f, 0.3f, by, 78f, 0f);
+                        ShrineGeometry.centerFromAuthoredY(
+                                BONE_LONG_BONE_CENTER_Y + terrainOffsetY(s, boneX, boneZ)),
+                        boneZ, BONE_LONG_BONE_SCALE_XZ, BONE_LONG_BONE_SCALE_Y,
+                        BONE_LONG_BONE_SCALE_XZ, by, BONE_LONG_BONE_LEAN_X_DEGREES, 0f);
             }
         }
     }
