@@ -42,8 +42,13 @@ class CommandHelpTest {
                 .build();
     }
 
+    private static CommandNode leaveTree() {
+        return Cmd.root("leave", "Return to the battleground hub", "shenaniganscore.use", CommandNode.Group.PLAYER)
+                .build();
+    }
+
     private static List<String> overview() {
-        return CommandHelp.render(List.of(bgTree(), abilityTree()), null);
+        return CommandHelp.render(List.of(bgTree(), abilityTree(), leaveTree()), null);
     }
 
     @Test
@@ -61,13 +66,14 @@ class CommandHelpTest {
         assertTrue(text.contains("/bg"), "root command shown");
         assertTrue(text.contains("/bg join"), "player leaf shown");
         assertTrue(text.contains("/ability"), "second root shown");
+        assertTrue(text.contains("/leave"), "leave root shown");
         assertTrue(text.contains("/bg setspawn"), "admin leaf shown");
         assertTrue(text.contains("/bg debug ability"), "nested admin leaf shown");
     }
 
     @Test
     void detailTopicResolvesByNameAndShowsUsage() {
-        List<String> lines = CommandHelp.render(List.of(bgTree(), abilityTree()), "join");
+        List<String> lines = CommandHelp.render(List.of(bgTree(), abilityTree(), leaveTree()), "join");
         String text = String.join("\n", lines);
         assertTrue(text.contains("Stage for the next round"));
         assertTrue(text.contains("Usage:"), "detail page shows the reconstructed usage");
@@ -76,7 +82,7 @@ class CommandHelpTest {
 
     @Test
     void unknownTopicShowsAnExplicitLineAfterTheOverview() {
-        List<String> lines = CommandHelp.render(List.of(bgTree(), abilityTree()), "nonesuch");
+        List<String> lines = CommandHelp.render(List.of(bgTree(), abilityTree(), leaveTree()), "nonesuch");
         String text = String.join("\n", lines);
         assertTrue(text.contains("Unknown topic"), "explicit unknown-topic line");
         assertTrue(text.contains("nonesuch"), "the requested topic is echoed");
@@ -85,10 +91,10 @@ class CommandHelpTest {
     }
 
     @Test
-    void renderWithBothRootsIncludesTheAbilityTree() {
-        String text = String.join("\n", CommandHelp.render(List.of(bgTree(), abilityTree()), null));
+    void renderWithAllRootsIncludesTheAbilityTree() {
+        String text = String.join("\n", CommandHelp.render(List.of(bgTree(), abilityTree(), leaveTree()), null));
         assertTrue(text.contains("/bg join"));
-        assertTrue(text.contains("/ability"), "second root shown when both are passed");
+        assertTrue(text.contains("/ability"), "second root shown when all are passed");
         assertTrue(text.contains("/ability 1"), "second root's leaf shown");
     }
 

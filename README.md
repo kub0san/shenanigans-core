@@ -6,7 +6,7 @@ A little bit of everything we like, thrown into one big PvP playground.
 
 This is just a fun project for a personal server, so don't expect everything to be perfectly balanced. The whole point is to mess around, try out cool mechanics, and have some fun with it.
 
-Right now, the plugin has two origins: **Jujutsu Kaisen** (four Domain Expansions and six cursed techniques) and **Minecraft** (dash sword, Executioner sword, Momentum mace). There's plenty more planned, with Terraria content and other series hopefully making their way into the plugin soon!
+Right now, the plugin has two origins: **Jujutsu Kaisen** (four Domain Expansions and six cursed techniques) and **Minecraft** (dash sword, Executioner axe, Momentum mace). There's plenty more planned, with Terraria content and other series hopefully making their way into the plugin soon!
 
 An *origin* is just what we call each series we take inspiration from.
 
