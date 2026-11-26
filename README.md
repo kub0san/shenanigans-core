@@ -6,13 +6,13 @@ A little bit of everything we like, thrown into one big PvP playground.
 
 This is just a fun project for a personal server, so don't expect everything to be perfectly balanced. The whole point is to mess around, try out cool mechanics, and have some fun with it.
 
-Right now, the plugin has its first origin: **Jujutsu Kaisen**, featuring four Domain Expansions and six cursed techniques. There's plenty more planned, with Terraria content and other series hopefully making their way into the plugin soon!
+Right now, the plugin has two origins: **Jujutsu Kaisen** (four Domain Expansions and six cursed techniques) and **Minecraft** (dash sword, Executioner sword, Momentum mace). There's plenty more planned, with Terraria content and other series hopefully making their way into the plugin soon!
 
 An *origin* is just what we call each series we take inspiration from.
 
 ## Features
 
-- **Multiple Origins:** Starting with Jujutsu Kaisen, with Terraria and other series planned for the future.
+- **Multiple Origins:** Jujutsu Kaisen and Minecraft today, with Terraria and other series planned for the future.
 - **Domain Expansions:** Malevolent Shrine , Unlimited Void, Time Cell Moon Palace, and Womb Profusion
 - **Cursed Techniques:** Fuga, Red, Blue, Purple, Piercing Blood, and World Slash. Cast them using `/ability 1|2|3`.
 - **Battleground:** A dedicated arena mode with capture mechanics, loadouts, a killstreak shop, and protection/restore systems.
@@ -24,6 +24,7 @@ A quick look at how everything is organized:
 
 - `src/main/java/.../core/` — The stuff that keeps everything running: displays, sessions, configs, particles, networking, and shared utilities.
 - `src/main/java/.../origins/jujutsukaisen/` — All the JJK-related content, including domains and techniques.
+- `src/main/java/.../origins/minecraft/` — Minecraft weapons under `weapons/{dashsword,executionsword,mace}/`, assembled by `MinecraftAbilities.register(...)` at enable.
 - `src/main/java/.../battleground/` — Everything related to the arena: combat, economy, menus, storage, and more.
 - `resourcepack/` — Our custom resource pack, including HUD textures, item models, and other assets.
 
@@ -31,6 +32,7 @@ A quick look at how everything is organized:
 
 - Java 25
 - Paper 1.21.11+ (target: Leaf 26.3-27, Paper API 26.3.build.27-alpha; Java 25)
+- Paper/Leaf only; not Folia.
 - PacketEvents (required)
 - WorldEdit or FAWE (optional — used for arena wand / snapshots)
 
