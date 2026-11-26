@@ -54,4 +54,14 @@ class GuiPagerTest {
         assertEquals(4, pager.to(4));   // a 4-item list truncates the [3,6) window
         assertEquals(6, pager.to(100));  // a longer list fills the full [3,6) window
     }
+
+    @Test
+    void pageSizeLargerThanSourceShowsAllItemsOnOnePage() {
+        List<String> items = List.of("a", "b");
+        GuiPager pager = GuiPager.of(0, items.size(), 9);
+        assertEquals(1, pager.maxPages());
+        assertEquals(0, pager.currentPage());
+        assertEquals(items, pager.slice(items));
+        assertEquals(items, GuiPager.of(3, items.size(), 9).slice(items), "out-of-range page clamps");
+    }
 }

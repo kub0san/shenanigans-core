@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Help is rendered from the same {@link CommandNode} tree that builds the Brigadier nodes. */
@@ -76,8 +75,21 @@ class CommandHelpTest {
     }
 
     @Test
-    void unknownTopicFallsBackToOverview() {
-        assertEquals(overview(), CommandHelp.render(List.of(bgTree(), abilityTree()), "nonesuch"));
+    void unknownTopicShowsAnExplicitLineAfterTheOverview() {
+        List<String> lines = CommandHelp.render(List.of(bgTree(), abilityTree()), "nonesuch");
+        String text = String.join("\n", lines);
+        assertTrue(text.contains("Unknown topic"), "explicit unknown-topic line");
+        assertTrue(text.contains("nonesuch"), "the requested topic is echoed");
+        assertTrue(text.contains("/bg join"), "still falls back to the overview");
+        assertTrue(lines.get(lines.size() - 1).contains("Unknown topic"), "line is at the end");
+    }
+
+    @Test
+    void renderWithBothRootsIncludesTheAbilityTree() {
+        String text = String.join("\n", CommandHelp.render(List.of(bgTree(), abilityTree()), null));
+        assertTrue(text.contains("/bg join"));
+        assertTrue(text.contains("/ability"), "second root shown when both are passed");
+        assertTrue(text.contains("/ability 1"), "second root's leaf shown");
     }
 
     @Test
