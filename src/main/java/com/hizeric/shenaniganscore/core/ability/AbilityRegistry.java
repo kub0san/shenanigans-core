@@ -17,22 +17,14 @@ public final class AbilityRegistry {
     }
 
     /**
-     * Registers a definition. Duplicate ids and duplicate icon materials are rejected with a
-     * warning rather than an exception: {@code Player#setCooldown} is per material, so two
-     * abilities sharing an icon would share a cooldown sweep.
+     * Registers a definition. Duplicate ids are rejected with a warning rather than an exception.
+     * Icon materials may be shared: cooldowns are keyed by ability id in {@code CooldownManager},
+     * not by the icon material.
      */
     public void register(AbilityDefinition definition) {
         if (byId.containsKey(definition.id())) {
             warningSink.accept("Duplicate ability id " + definition.id() + " ignored.");
             return;
-        }
-        for (AbilityDefinition other : byId.values()) {
-            if (other.iconMaterial() == definition.iconMaterial()) {
-                warningSink.accept("Ability " + definition.id() + " uses icon material "
-                        + definition.iconMaterial() + " already used by " + other.id()
-                        + "; it was not registered (cooldown sweeps would collide).");
-                return;
-            }
         }
         byId.put(definition.id(), definition);
     }
