@@ -7,7 +7,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Material;
 
 /**
- * The Executioner's Sword cast: arms the next landed sword hit for the heavy uppercut or
+ * The Executioner's Axe cast: arms the next landed axe hit for the heavy uppercut or
  * the Final Verdict execution, depending on the target's health at contact.
  */
 public final class ExecutionerSwordAbility {
@@ -22,8 +22,8 @@ public final class ExecutionerSwordAbility {
     public static AbilityDefinition definition(ExecutionerSwordHitListener listener) {
         return new AbilityDefinition(
                 ID,
-                MM.deserialize("<dark_red><bold>Executioner's Sword"),
-                Material.DIAMOND_SWORD,
+                MM.deserialize("<dark_red><bold>Executioner's Axe"),
+                Material.DIAMOND_AXE,
                 0,
                 ExecutionerSwordItem::cooldownSeconds,
                 1.0,

@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Thin Bukkit display driver for the Executioner's Sword: a heavy uppercut slash and the
+ * Thin Bukkit display driver for the Executioner's Axe: a heavy uppercut slash and the
  * 24-tick "Final Verdict" execution cutscene. Mirrors {@code DashSwordEffect}.
  */
 public final class ExecutionerSwordEffect {
