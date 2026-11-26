@@ -60,7 +60,7 @@ abilities:
       damage: 18.0
     piercing-blood:
       cooldown: 45
-      damage: 14.0
+      damage: 18.0
       armor-piercing: true
     purple:
       cooldown: 60
