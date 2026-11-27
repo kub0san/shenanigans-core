@@ -40,7 +40,8 @@ public class Ability {
                 (player, power) -> perform(player, power),
                 player -> ShenanigansCore.getInstance().getSessionManager()
                         .hasActiveSession(player.getUniqueId()),
-                false
+                false,
+                player -> { if (com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities.isTechniqueFxEnabled()) com.hizeric.shenaniganscore.origins.jujutsukaisen.util.TechniqueFx.burst(player, ID, com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities.isTechniqueFxEnabled()); }
         );
     }
 

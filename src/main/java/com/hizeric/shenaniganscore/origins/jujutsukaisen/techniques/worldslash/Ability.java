@@ -46,7 +46,8 @@ public class Ability {
                     return core.getSessionManager().hasActiveSession(player.getUniqueId())
                             && WorldSlashCast.findShrine(player) == null;
                 },
-                false
+                false,
+                player -> { if (com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities.isTechniqueFxEnabled()) com.hizeric.shenaniganscore.origins.jujutsukaisen.util.TechniqueFx.burst(player, ID, com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities.isTechniqueFxEnabled()); }
         );
     }
 

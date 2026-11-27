@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Logger;
 
 /**
  * The single gate every ability cast passes through, regardless of source.
@@ -27,12 +28,18 @@ public final class AbilityCaster {
 
     private final AbilityRegistry registry;
     private final CooldownManager cooldowns;
+    private final Logger logger;
     private final List<Gate> gates = new CopyOnWriteArrayList<>();
     private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
     public AbilityCaster(AbilityRegistry registry, CooldownManager cooldowns) {
+        this(registry, cooldowns, null);
+    }
+
+    public AbilityCaster(AbilityRegistry registry, CooldownManager cooldowns, Logger logger) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.cooldowns = Objects.requireNonNull(cooldowns, "cooldowns");
+        this.logger = logger == null ? Logger.getLogger(AbilityCaster.class.getName()) : logger;
     }
 
     public AbilityRegistry registry() { return registry; }
@@ -91,7 +98,13 @@ public final class AbilityCaster {
             if (cooldownClaimed) cooldowns.clear(uuid, cooldownKey);
             throw t;
         }
-        if (source != CastSource.DEBUG) TechniqueFx.burst(player, id);
+        if (source != CastSource.DEBUG) {
+            try {
+                definition.flourish().play(player);
+            } catch (RuntimeException exception) {
+                logger.warning("Cast flourish failed for " + id + ": " + exception.getMessage());
+            }
+        }
         return CastResult.OK;
     }
 

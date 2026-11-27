@@ -35,9 +35,19 @@ public final class JujutsuAbilities {
             com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.timecellmoonpalace.Ability.ID,
             com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.wombprofusion.Ability.ID);
 
+    private static volatile boolean techniqueFxEnabled = true;
+
     private JujutsuAbilities() { }
 
+    public static boolean isTechniqueFxEnabled() { return techniqueFxEnabled; }
+    public static void setTechniqueFxEnabled(boolean enabled) { techniqueFxEnabled = enabled; }
+
     public static void register(AbilityRegistry registry) {
+        register(registry, true);
+    }
+
+    public static void register(AbilityRegistry registry, boolean techniqueFxEnabled) {
+        setTechniqueFxEnabled(techniqueFxEnabled);
         registry.register(BLUE.definition());
         registry.register(RED.definition());
         registry.register(FUGA.definition());

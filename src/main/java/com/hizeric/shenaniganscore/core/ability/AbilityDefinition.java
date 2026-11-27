@@ -30,6 +30,7 @@ public final class AbilityDefinition {
     private final BiConsumer<Player, Double> performer;
     private final Predicate<Player> domainBlocked;
     private final boolean hidden;
+    private final CastFlourish flourish;
 
     /**
      * @param domainBlocked predicate returning {@code true} when a live domain prevents this cast.
@@ -39,6 +40,15 @@ public final class AbilityDefinition {
                              IntSupplier cooldownSeconds, double power,
                              BiConsumer<Player, Double> performer, Predicate<Player> domainBlocked,
                              boolean hidden) {
+        this(id, displayName, iconMaterial, price, cooldownSeconds, power, performer, domainBlocked,
+                hidden, CastFlourish.NONE);
+    }
+
+    /** Constructor with an optional origin-owned cast flourish. */
+    public AbilityDefinition(AbilityId id, Component displayName, Material iconMaterial, int price,
+                             IntSupplier cooldownSeconds, double power,
+                             BiConsumer<Player, Double> performer, Predicate<Player> domainBlocked,
+                             boolean hidden, CastFlourish flourish) {
         this.id = Objects.requireNonNull(id, "id");
         this.displayName = Objects.requireNonNull(displayName, "displayName");
         this.iconMaterial = Objects.requireNonNull(iconMaterial, "iconMaterial");
@@ -48,6 +58,7 @@ public final class AbilityDefinition {
         this.performer = Objects.requireNonNull(performer, "performer");
         this.domainBlocked = Objects.requireNonNull(domainBlocked, "domainBlocked");
         this.hidden = hidden;
+        this.flourish = flourish == null ? CastFlourish.NONE : flourish;
     }
 
     public AbilityId id() { return id; }
@@ -58,5 +69,6 @@ public final class AbilityDefinition {
     public double power() { return power; }
     public boolean isDomainBlocked(Player player) { return domainBlocked.test(player); }
     public boolean hidden() { return hidden; }
+    public CastFlourish flourish() { return flourish; }
     public void perform(Player player) { performer.accept(player, power); }
 }

@@ -224,8 +224,8 @@ public final class ShenanigansCore extends JavaPlugin {
         // Ability catalogue. Casts are gated by cooldowns and, inside the mode, by
         // battleground catalog ownership and streak — never by a mana bar.
         this.abilityRegistry = new AbilityRegistry(message -> getLogger().warning(message));
-        this.abilityCaster = new AbilityCaster(abilityRegistry, cooldownManager);
-        JujutsuAbilities.register(abilityRegistry);
+        this.abilityCaster = new AbilityCaster(abilityRegistry, cooldownManager, getLogger());
+        JujutsuAbilities.register(abilityRegistry, readTechniqueFxEnabled(getDataFolder(), getLogger()));
         MinecraftAbilities.register(abilityRegistry, this);
         getLogger().info("Registered " + abilityRegistry.size() + " abilities.");
 
@@ -468,6 +468,23 @@ public final class ShenanigansCore extends JavaPlugin {
         } catch (Throwable t) {
             getLogger().log(Level.SEVERE,
                     "ShenanigansCore teardown step '" + step + "' failed; continuing.", t);
+        }
+    }
+
+    /** Reads the {@code technique-fx.enabled} flag from {@code config.yml}; defaults to {@code true}. */
+    public static boolean readTechniqueFxEnabled(java.io.File dataFolder, java.util.logging.Logger logger) {
+        if (dataFolder == null) return true;
+        java.io.File configFile = new java.io.File(dataFolder, "config.yml");
+        if (!configFile.isFile()) return true;
+        try {
+            org.spongepowered.configurate.yaml.YamlConfigurationLoader loader =
+                    org.spongepowered.configurate.yaml.YamlConfigurationLoader.builder()
+                            .path(configFile.toPath()).build();
+            org.spongepowered.configurate.ConfigurationNode root = loader.load();
+            return root.node("technique-fx", "enabled").getBoolean(true);
+        } catch (Exception e) {
+            if (logger != null) logger.warning("Could not read technique-fx.enabled; defaulting to true: " + e.getMessage());
+            return true;
         }
     }
 

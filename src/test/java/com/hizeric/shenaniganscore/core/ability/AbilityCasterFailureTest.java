@@ -130,11 +130,14 @@ class AbilityCasterFailureTest {
         CooldownManager cooldowns = new CooldownManager();
         AtomicInteger performs = new AtomicInteger();
 
-        registryWith(id, 45, (p, power) -> performs.incrementAndGet(), p -> false);
+        registry = new AbilityRegistry(message -> { });
+        registry.register(new AbilityDefinition(id, Component.text(id.toString()), Material.STONE,
+                0, () -> 45, 1.0, (p, power) -> performs.incrementAndGet(), p -> false, false,
+                p -> { throw new RuntimeException("flourish boom"); }));
 
-        assertThrows(RuntimeException.class,
-                () -> caster(cooldowns).cast(player, id, CastSource.COMMAND));
+        CastResult result = caster(cooldowns).cast(player, id, CastSource.COMMAND);
 
+        assertEquals(CastResult.OK, result, "a flourish failure must not turn the cast into a failure");
         assertEquals(1, performs.get(), "the cast succeeded; a flourish failure must not undo it");
         assertTrue(cooldowns.isOnCooldown(uuid, id.toString()),
                 "a successful cast keeps its claimed cooldown even when the flourish throws");
