@@ -140,6 +140,8 @@ class DashAnimationTest {
     @Test
     void stalledOnlyWhenDecayedStepIsMissed() {
         assertFalse(DashAnimation.stalled(0.04, DashMovement.speed(2.4, 0.035, 28)));
+        assertTrue(DashAnimation.stalled(0.0, DashMovement.speed(2.4, 0.035, 28)));
+        assertFalse(DashAnimation.stalled(0.5, DashMovement.speed(2.4, 0.035, 28)));
     }
 
     @Test

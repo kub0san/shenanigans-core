@@ -21,7 +21,11 @@ public final class DashAnimation {
 
     private static final Vector UP = new Vector(0, 1, 0);
 
-    /** Fraction of the decayed step a dash must still cover to count as moving, not stalled. */
+    /**
+     * Base fraction for the stall threshold; the effective cutoff is {@code expectedStep *
+     * STALL_DELTA * STALL_DELTA} (≈0.0025 of the decayed step), so only a near-total freeze counts
+     * as stalled. Squared on purpose — see {@link #stalled}.
+     */
     private static final double STALL_DELTA = 0.05;
 
     public enum Kind {
