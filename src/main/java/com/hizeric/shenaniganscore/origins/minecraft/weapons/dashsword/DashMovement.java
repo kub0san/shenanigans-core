@@ -51,21 +51,23 @@ public final class DashMovement {
     }
 
     /**
-     * Flight heading at {@code tick}: the launch direction flattened to the horizontal plane,
-     * normalized, then yawed right by {@link #YAW_DRIFT_DEGREES_PER_TICK} degrees per tick.
-     * Pitch is never changed. A vertical (or missing) launch direction falls back to {@code (1,0,0)}.
+     * Flight heading at {@code tick}: the normalized launch direction, yawed about world up by
+     * {@link #YAW_DRIFT_DEGREES_PER_TICK} degrees per tick. Pitch is preserved — only the
+     * horizontal heading rotates. A vertical (or missing) launch direction, whose horizontal
+     * component is degenerate, falls back to {@code (1,0,0)} before the same yaw is applied.
      */
     public static Vector headingAt(Vector launchForward, int tick) {
         Vector base = launchForward == null ? new Vector(1, 0, 0) : launchForward.clone();
-        base.setY(0.0);
         if (base.lengthSquared() < 1.0e-8) base = new Vector(1, 0, 0);
         base.normalize();
+        double horizontal = base.getX() * base.getX() + base.getZ() * base.getZ();
+        if (horizontal < 1.0e-8) base = new Vector(1, 0, 0);
         double radians = Math.toRadians(YAW_DRIFT_DEGREES_PER_TICK * Math.max(0, tick));
         double cos = Math.cos(radians);
         double sin = Math.sin(radians);
         double x = base.getX() * cos + base.getZ() * sin;
         double z = base.getZ() * cos - base.getX() * sin;
-        return new Vector(x, 0.0, z).normalize();
+        return new Vector(x, base.getY(), z).normalize();
     }
 
     /** Total distance covered over {@code ticks} ticks of decayed flight. */
