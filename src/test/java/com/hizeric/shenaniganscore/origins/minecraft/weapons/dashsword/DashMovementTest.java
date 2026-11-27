@@ -43,4 +43,39 @@ class DashMovementTest {
         assertEquals(0.0, v.getX(), 1e-9);
         assertEquals(2.6, v.getZ(), 1e-9);
     }
+
+    @Test
+    void headingAtTurnsRightWithoutChangingPitch() {
+        Vector h = DashMovement.headingAt(new Vector(0, 0, 1), 28);
+        assertEquals(44.8, Math.toDegrees(Math.atan2(h.getX(), h.getZ())), 0.1);
+        assertEquals(0.0, h.getY(), 1e-9);
+    }
+
+    @Test
+    void headingAtHandlesVerticalInput() {
+        assertEquals(new Vector(1, 0, 0), DashMovement.headingAt(new Vector(0, 1, 0), 0));
+    }
+
+    @Test
+    void headingAtStaysNormalized() {
+        Vector h = DashMovement.headingAt(new Vector(0.3, 0.9, -0.4), 13);
+        assertEquals(1.0, h.length(), 1e-9);
+        assertEquals(0.0, h.getY(), 1e-9);
+    }
+
+    @Test
+    void distanceAfterUsesDecayedSteps() {
+        assertEquals(distanceAfter(28, 2.4, 0.035), distanceAfter(27, 2.4, 0.035)
+                + DashMovement.speed(2.4, 0.035, 28), 1e-9);
+    }
+
+    @Test
+    void distanceAfterIsZeroWithoutTicks() {
+        assertEquals(0.0, distanceAfter(0, 2.4, 0.035), 1e-9);
+        assertEquals(0.0, distanceAfter(-5, 2.4, 0.035), 1e-9);
+    }
+
+    private static double distanceAfter(int ticks, double momentum, double decayPerTick) {
+        return DashMovement.distanceAfter(ticks, momentum, decayPerTick);
+    }
 }
