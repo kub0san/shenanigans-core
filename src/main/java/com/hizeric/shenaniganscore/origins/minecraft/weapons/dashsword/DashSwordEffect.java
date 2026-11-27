@@ -17,9 +17,10 @@ import java.util.List;
  * Thin Bukkit driver for the Rift Cleave dash-sword sequence.
  *
  * <p>All timing and geometry comes from {@link DashAnimation}; this class turns frames into
- * particles, sounds, mannequin echoes and display-entity wind visuals. The dash follows a locked
- * straight line — including downward — and the timeline ends early once that motion stops. Every
- * spawned effect is owned by a helper and removed when the timeline ends.</p>
+ * particles, sounds, mannequin echoes and display-entity wind visuals. The dash flies a fixed,
+ * gently curving, decelerating path (see {@link DashMovement}) — no live look input — and the
+ * timeline ends early once that motion stops. Every spawned effect is owned by a helper and
+ * removed when the timeline ends.</p>
  */
 public final class DashSwordEffect {
 
@@ -59,12 +60,9 @@ public final class DashSwordEffect {
         private final Player player;
         private final Vector forward;
         private final Location origin;
-        private final Location echoOrigin;
         private final World world;
         private final GameMode launchGameMode;
         private Location lastPosition;
-        private final float launchYaw;
-        private final float launchPitch;
         private final List<DashAnimation.Frame> launch = DashAnimation.launch();
         private final List<DashAnimation.Frame> trail = DashAnimation.trail();
         private final MannequinEchoRenderer echoes;
@@ -81,12 +79,9 @@ public final class DashSwordEffect {
             this.player = player;
             this.forward = forward.clone().normalize();
             this.origin = player.getLocation().clone().add(0, 0.9, 0);
-            this.echoOrigin = this.origin.clone();
             this.world = player.getWorld();
             this.launchGameMode = player.getGameMode();
             this.lastPosition = player.getLocation().clone();
-            this.launchYaw = player.getLocation().getYaw();
-            this.launchPitch = player.getLocation().getPitch();
             this.echoes = new MannequinEchoRenderer(player);
             this.visibility = new DashVisibilityMask(player);
             this.wind = new WindTrailEffect(player, origin, forward);
@@ -131,37 +126,68 @@ public final class DashSwordEffect {
                 return;
             }
             lastPosition = current.clone();
-            double trail = DashAnimation.trailDistance(tick, FORWARD_MOMENTUM, current.distance(origin));
 
-            // Gravity and knockback must not bend the locked path — including a downward dash.
-            player.setVelocity(DashMovement.velocity(forward,
+            // The dash flies a fixed curve: heading yaws right every tick, speed decays. The path
+            // point is the ideal curve clamped to how far the player actually got (walls/ground).
+            Vector heading = DashMovement.headingAt(forward, tick);
+            player.setVelocity(DashMovement.velocity(heading,
                     DashMovement.speed(FORWARD_MOMENTUM, DashMovement.DEFAULT_DECAY_PER_TICK, tick)));
+
+            double pathDistance = DashMovement.distanceAfter(tick, FORWARD_MOMENTUM,
+                    DashMovement.DEFAULT_DECAY_PER_TICK);
+            double trail = DashAnimation.trailDistance(pathDistance, current.distance(origin));
+            Location point = origin.clone().add(pathOffset(trail));
 
             DashAnimation.Frame launchFrame = launch.get(Math.min(tick, launch.size() - 1));
             DashAnimation.Frame trailFrame = this.trail.get(Math.min(tick, this.trail.size() - 1));
 
             if (launchFrame.swing()) player.swingMainHand();
-            for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn, trail);
+            for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn, point);
             for (DashAnimation.Sound sound : DashAnimation.soundsForTick(tick)) play(sound);
 
-            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn, trail);
+            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn, point, heading);
             echoes.tick(tick);
             visibility.tick();
-            wind.tick(tick);
+            wind.tick(tick, heading);
             tick++;
         }
 
-        private void spawnLaunch(DashAnimation.DisplaySpawn spawn, double trail) {
+        /**
+         * Offset from {@link #origin} to the point at {@code arcLength} along the curved path:
+         * sum {@code velocity(headingAt(forward, t), speed(t))} for t = 1.. until the arc is used
+         * up, interpolating the final partial segment so a wall-clamped trail lands exactly on the
+         * realized distance.
+         */
+        private Vector pathOffset(double arcLength) {
+            Vector offset = new Vector(0, 0, 0);
+            double remaining = Math.max(0.0, arcLength);
+            for (int t = 1; remaining > 1.0e-9 && t <= DashAnimation.TRAIL_TICKS; t++) {
+                Vector step = DashMovement.velocity(
+                        DashMovement.headingAt(forward, t),
+                        DashMovement.speed(FORWARD_MOMENTUM, DashMovement.DEFAULT_DECAY_PER_TICK, t));
+                double length = step.length();
+                if (length <= 1.0e-9) break;
+                if (length >= remaining) {
+                    offset.add(step.multiply(remaining / length));
+                    remaining = 0.0;
+                } else {
+                    offset.add(step);
+                    remaining -= length;
+                }
+            }
+            return offset;
+        }
+
+        private void spawnLaunch(DashAnimation.DisplaySpawn spawn, Location point) {
             switch (spawn.kind()) {
                 case CLEAVE_BURST -> {
                     player.getWorld().spawnParticle(Particle.SWEEP_ATTACK,
-                            origin.clone().add(forward.clone().multiply(0.9)), 1, 0, 0, 0, 0);
-                    player.getWorld().spawnParticle(Particle.CLOUD, origin,
+                            point, 1, 0, 0, 0, 0);
+                    player.getWorld().spawnParticle(Particle.CLOUD, point,
                             spawn.count(), 0.02, 0.02, 0.02, 0.01);
                 }
                 case RIFT_RIBBON -> player.getWorld().spawnParticle(Particle.END_ROD,
-                        origin.clone().add(forward.clone().multiply(0.15 * trail)),
-                        spawn.count(), 0.05, 0.05, 0.05, 0.01);
+                        point, spawn.count(), 0.05, 0.05, 0.05, 0.01);
                 case WIND_CHARGE -> {
                     // The beat fires on three frames, but the burst is a single launch cue.
                     if (!windBurstLaunched) {
@@ -175,15 +201,15 @@ public final class DashSwordEffect {
             }
         }
 
-        private void spawnEchoes(DashAnimation.DisplaySpawn spawn, double trail) {
-            // The trail follows the locked launch line, not the live camera or a turned head.
-            Location point = echoOrigin.clone()
-                    .add(forward.clone().multiply(trail));
+        private void spawnEchoes(DashAnimation.DisplaySpawn spawn, Location point, Vector heading) {
+            // Echoes ride the curved path and face along its tangent, not the cast heading.
+            float yaw = DashAnimation.echoYaw(heading);
+            float pitch = DashAnimation.echoPitch(heading);
             for (int i = 0; i < spawn.count(); i++) {
-                echoes.spawn(point, launchYaw, launchPitch, tick);
+                echoes.spawn(point, yaw, pitch, tick);
                 player.getWorld().spawnParticle(Particle.CLOUD, point, 2, 0.06, 0.06, 0.06, 0.01);
             }
-            wind.trailStreak(point, tick);
+            wind.trailStreak(point, heading, tick);
         }
 
         private void play(DashAnimation.Sound cue) {
