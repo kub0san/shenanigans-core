@@ -90,10 +90,27 @@ class DashAnimationTest {
     }
 
     @Test
-    void trailDistanceNeverExceedsFormulaOrRealizedTravel() {
-        assertEquals(6.0, DashAnimation.trailDistance(3, 2.0, 100.0), 1.0e-9);
-        assertEquals(1.5, DashAnimation.trailDistance(2, 2.0, 1.5), 1.0e-9);
-        assertEquals(0.0, DashAnimation.trailDistance(1, 2.0, -4.0), 1.0e-9);
+    void trailDistanceUsesAccumulatedDecayedDistance() {
+        double d = DashMovement.distanceAfter(16, 2.4, 0.035);
+        assertEquals(d, DashAnimation.trailDistance(d, 999.0), 1e-9);
+    }
+
+    @Test
+    void trailDistanceStillClampsToRealizedTravel() {
+        assertEquals(1.5, DashAnimation.trailDistance(9.0, 1.5), 1e-9);
+    }
+
+    @Test
+    void echoFacingFollowsTheBeatHeading() {
+        Vector north = new Vector(0, 0, 1);
+        assertEquals(0.0f, DashAnimation.echoYaw(north), 1e-6f);
+        assertEquals(0.0f, DashAnimation.echoPitch(north), 1e-6f);
+
+        Vector turned = DashMovement.headingAt(north, 16);
+        assertEquals(0.0f, DashAnimation.echoPitch(turned), 1e-6f,
+                "the path is horizontal, so echoes never pitch");
+        assertTrue(Math.abs(DashAnimation.echoYaw(turned)) > 1.0f,
+                "echo yaw must turn with the path, not stay at the cast heading");
     }
 
     @Test

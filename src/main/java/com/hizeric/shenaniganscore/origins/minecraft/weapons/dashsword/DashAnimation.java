@@ -76,9 +76,24 @@ public final class DashAnimation {
         return (float) Math.max(0.05, 1.0 - age / (double) GHOST_LIFE);
     }
 
-    /** Formulaic placement clamped to the distance the dash actually realized. */
-    public static double trailDistance(int tick, double speedPerTick, double actualTravel) {
-        return Math.min(speedPerTick * tick, Math.max(0.0, actualTravel));
+    /**
+     * Placement distance clamped to the distance the dash actually realized. The accumulated curve
+     * distance ({@link DashMovement#distanceAfter}) is the ideal; a wall or ground early-end makes
+     * the realized travel shorter, so the trail never draws ahead of the player. Never negative.
+     */
+    public static double trailDistance(double pathDistance, double actualTravel) {
+        return Math.min(pathDistance, Math.max(0.0, actualTravel));
+    }
+
+    /** Minecraft yaw (degrees) a mannequin echo faces along {@code heading}. */
+    public static float echoYaw(Vector heading) {
+        return (float) Math.toDegrees(Math.atan2(-heading.getX(), heading.getZ()));
+    }
+
+    /** Minecraft pitch (degrees) a mannequin echo faces along {@code heading} (0 = level). */
+    public static float echoPitch(Vector heading) {
+        double clamped = Math.max(-1.0, Math.min(1.0, -heading.getY()));
+        return (float) Math.toDegrees(Math.asin(clamped));
     }
 
     /** A downward dash started on the ground and never airborne cannot move; abort it. */

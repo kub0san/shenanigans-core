@@ -76,10 +76,12 @@ public final class WindTrailEffect {
         final Vector3f startScale;
         final Vector3f scaleGain;
         final double forwardDrift;
+        /** Facing captured at spawn; already-spawned planes are never retro-rotated. */
+        final Vector3f facing;
 
         Tracked(Display display, Type type, int bornTick, int lifeTicks, Location anchor,
                 Vector outward, double startRadius, double radiusGain, Vector3f startScale,
-                Vector3f scaleGain, double forwardDrift) {
+                Vector3f scaleGain, double forwardDrift, Vector3f facing) {
             this.display = display;
             this.type = type;
             this.bornTick = bornTick;
@@ -91,6 +93,7 @@ public final class WindTrailEffect {
             this.startScale = startScale;
             this.scaleGain = scaleGain;
             this.forwardDrift = forwardDrift;
+            this.facing = facing;
         }
     }
 
@@ -136,7 +139,7 @@ public final class WindTrailEffect {
                     RING_START_SCALE, (float) Math.toDegrees(angle), 0f, 0f, 1);
             tracked.add(new Tracked(display, Type.RING, tick, RING_LIFE, origin.clone(), outward,
                     RING_START_RADIUS, RING_RADIUS_GAIN, new Vector3f(RING_START_SCALE),
-                    new Vector3f(RING_SCALE_GAIN), RING_FORWARD_DRIFT));
+                    new Vector3f(RING_SCALE_GAIN), RING_FORWARD_DRIFT, facing));
         }
 
         for (int i = 0; i < LAUNCH_GUST_COUNT; i++) {
@@ -150,14 +153,18 @@ public final class WindTrailEffect {
             TransformUtils.applyFacing(display, new Vector3f(GUST_START_SCALE), facing, PIVOT, 1);
             tracked.add(new Tracked(display, Type.GUST, tick, GUST_LIFE, origin.clone(), outward,
                     GUST_START_RADIUS, GUST_RADIUS_GAIN, new Vector3f(GUST_START_SCALE),
-                    new Vector3f(GUST_SCALE_GAIN), GUST_FORWARD_DRIFT));
+                    new Vector3f(GUST_SCALE_GAIN), GUST_FORWARD_DRIFT, facing));
         }
     }
 
-    /** Sparse, short-lived wind streaks around an echo-beat point, drifting outward. */
-    public void trailStreak(Location point, int tick) {
+    /**
+     * Sparse, short-lived wind streaks around an echo-beat {@code point}, drifting outward. The
+     * {@code heading} is the path tangent at this beat, so new streaks face along the turn.
+     */
+    public void trailStreak(Location point, Vector heading, int tick) {
         if (closed || point == null || point.getWorld() == null) return;
 
+        Vector3f streakFacing = facingOf(heading);
         for (int i = 0; i < STREAK_COUNT; i++) {
             double angle = (Math.PI * 2.0 * i) / STREAK_COUNT + tick * 0.6;
             Vector outward = radial(angle);
@@ -165,17 +172,22 @@ public final class WindTrailEffect {
                     .add(outward.clone().multiply(STREAK_START_RADIUS));
             Material material = STREAK_MATERIALS[i % STREAK_MATERIALS.length];
             BlockDisplay display = DisplayUtils.spawnBlock(at, material, blockOptions());
-            TransformUtils.applyFacing(display, new Vector3f(STREAK_START_SCALE), facing, PIVOT, 1);
+            TransformUtils.applyFacing(display, new Vector3f(STREAK_START_SCALE), streakFacing, PIVOT, 1);
             tracked.add(new Tracked(display, Type.STREAK, tick, STREAK_LIFE, point.clone(), outward,
                     STREAK_START_RADIUS, STREAK_RADIUS_GAIN, new Vector3f(STREAK_START_SCALE),
-                    new Vector3f(STREAK_SCALE_GAIN), STREAK_FORWARD_DRIFT));
+                    new Vector3f(STREAK_SCALE_GAIN), STREAK_FORWARD_DRIFT, streakFacing));
         }
     }
 
-    /** Expands/stretches tracked displays and removes any that have expired. */
-    public void tick(int currentTick) {
+    /**
+     * Expands/stretches tracked displays and removes any that have expired. {@code heading} is the
+     * live path tangent: it steers each display's forward drift so the wind follows the turn, while
+     * a display's facing stays as captured at spawn (no retroactive rotation).
+     */
+    public void tick(int currentTick, Vector heading) {
         if (closed) return;
 
+        Vector drift = driftDirection(heading);
         Iterator<Tracked> it = tracked.iterator();
         while (it.hasNext()) {
             Tracked entry = it.next();
@@ -190,7 +202,7 @@ public final class WindTrailEffect {
             double radius = entry.startRadius + entry.radiusGain * age;
             Location at = entry.anchor.clone()
                     .add(entry.outward.clone().multiply(radius))
-                    .add(forward.clone().multiply(entry.forwardDrift * age));
+                    .add(drift.clone().multiply(entry.forwardDrift * age));
             entry.display.teleport(at);
 
             float sx = Math.max(0.02f, entry.startScale.x + entry.scaleGain.x * age);
@@ -202,7 +214,7 @@ public final class WindTrailEffect {
                         age * 18.0f, 0f, 0f, 1);
             } else {
                 TransformUtils.applyFacing(
-                        entry.display, new Vector3f(sx, sy, sz), facing, PIVOT, 1);
+                        entry.display, new Vector3f(sx, sy, sz), entry.facing, PIVOT, 1);
             }
         }
     }
@@ -219,6 +231,18 @@ public final class WindTrailEffect {
     private Vector radial(double angle) {
         return right.clone().multiply(Math.cos(angle))
                 .add(up.clone().multiply(Math.sin(angle)));
+    }
+
+    /** Facing vector for a beat heading, falling back to the cast facing if degenerate. */
+    private Vector3f facingOf(Vector heading) {
+        if (heading == null || heading.lengthSquared() < 1.0e-6) return facing;
+        return new Vector3f((float) heading.getX(), (float) heading.getY(), (float) heading.getZ());
+    }
+
+    /** Live drift direction for this tick, falling back to the cast forward if degenerate. */
+    private Vector driftDirection(Vector heading) {
+        if (heading == null || heading.lengthSquared() < 1.0e-6) return forward;
+        return heading.clone().normalize();
     }
 
     private static void remove(Display display) {
