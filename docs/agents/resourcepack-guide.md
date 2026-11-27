@@ -174,6 +174,7 @@ pack conventions:
 - `assets/shenanigans/models/item/*.json` — model descriptors pointing at textures.
 - `assets/shenanigans/textures/item/*.png` — item textures (32×32, same as icons).
 - GUI buttons use vanilla materials; custom models are for abilities only.
+- Womb Profusion (`jjk:womb_profusion`) deliberately has no custom item model — `GuiTheme.abilityModel` returns null and the GUI uses the vanilla icon; do not invent art for it.
 - The canvas stays vanilla stained glass — no custom background art.
 
 **Do not modify these unless explicitly asked.** They are out of scope for the HUD.

@@ -71,11 +71,6 @@ public final class TechniqueGlyphs {
                 '\uE0EF', '\uE0F0', '\uE0F1', '\uE0F2', '\uE0F3', '\uE0F4', '\uE0F5',
                 '\uE0F6', '\uE0F7', '\uE0F8', '\uE0F9', '\uE0FA', '\uE0FB', '\uE0FC');
 
-        private static final Map<String, Technique> BY_ID = new HashMap<>();
-        static {
-            for (Technique t : values()) BY_ID.put(t.canonicalId, t);
-        }
-
         private final String canonicalId;
         private final char ready;
         private final char locked;
