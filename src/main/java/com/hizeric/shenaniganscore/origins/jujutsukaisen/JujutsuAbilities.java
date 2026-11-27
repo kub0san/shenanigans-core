@@ -2,6 +2,7 @@ package com.hizeric.shenaniganscore.origins.jujutsukaisen;
 
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
+import com.hizeric.shenaniganscore.core.ability.RegistrationContext;
 
 import java.util.List;
 
@@ -48,15 +49,21 @@ public final class JujutsuAbilities {
 
     public static void register(AbilityRegistry registry, boolean techniqueFxEnabled) {
         setTechniqueFxEnabled(techniqueFxEnabled);
-        registry.register(BLUE.definition());
-        registry.register(RED.definition());
-        registry.register(FUGA.definition());
-        registry.register(PIERCING_BLOOD.definition());
-        registry.register(PURPLE.definition());
-        registry.register(WORLD_SLASH.definition());
-        registry.register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.malevolentshrine.Ability.definition());
-        registry.register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.unlimitedvoid.Ability.definition());
-        registry.register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.timecellmoonpalace.Ability.definition());
-        registry.register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.wombprofusion.Ability.definition());
+        register(new RegistrationContext(registry,
+                listener -> { },
+                java.util.logging.Logger.getLogger("shenanigans-core")));
+    }
+
+    public static void register(RegistrationContext ctx) {
+        ctx.abilities().register(BLUE.definition());
+        ctx.abilities().register(RED.definition());
+        ctx.abilities().register(FUGA.definition());
+        ctx.abilities().register(PIERCING_BLOOD.definition());
+        ctx.abilities().register(PURPLE.definition());
+        ctx.abilities().register(WORLD_SLASH.definition());
+        ctx.abilities().register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.malevolentshrine.Ability.definition());
+        ctx.abilities().register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.unlimitedvoid.Ability.definition());
+        ctx.abilities().register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.timecellmoonpalace.Ability.definition());
+        ctx.abilities().register(com.hizeric.shenaniganscore.origins.jujutsukaisen.domainexpansions.wombprofusion.Ability.definition());
     }
 }

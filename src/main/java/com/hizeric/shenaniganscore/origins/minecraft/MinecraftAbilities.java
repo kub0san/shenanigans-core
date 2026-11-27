@@ -2,6 +2,8 @@ package com.hizeric.shenaniganscore.origins.minecraft;
 
 import com.hizeric.shenaniganscore.ShenanigansCore;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
+import com.hizeric.shenaniganscore.core.ability.ListenerSink;
+import com.hizeric.shenaniganscore.core.ability.RegistrationContext;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordAbility;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashSwordHitListener;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordAbility;
@@ -22,15 +24,20 @@ public final class MinecraftAbilities {
     private MinecraftAbilities() { }
 
     public static void register(AbilityRegistry registry, ShenanigansCore plugin) {
-        registry.register(DashSwordAbility.definition());
-        plugin.getServer().getPluginManager().registerEvents(new DashSwordHitListener(plugin), plugin);
+        ListenerSink sink = listener -> plugin.getServer().getPluginManager().registerEvents(listener, plugin);
+        register(new RegistrationContext(registry, sink, plugin.getLogger()));
+    }
+
+    public static void register(RegistrationContext ctx) {
+        ctx.abilities().register(DashSwordAbility.definition());
+        ctx.listeners().add(new DashSwordHitListener(ShenanigansCore.getInstance()));
 
         ExecutionerSwordHitListener listener = new ExecutionerSwordHitListener();
-        registry.register(ExecutionerSwordAbility.definition(listener));
-        plugin.getServer().getPluginManager().registerEvents(listener, plugin);
+        ctx.abilities().register(ExecutionerSwordAbility.definition(listener));
+        ctx.listeners().add(listener);
 
-        registry.register(MomentumMaceAbility.definition());
-        plugin.getServer().getPluginManager().registerEvents(new MomentumMaceHitListener(), plugin);
-        plugin.getServer().getPluginManager().registerEvents(new MomentumMaceFallProtection(), plugin);
+        ctx.abilities().register(MomentumMaceAbility.definition());
+        ctx.listeners().add(new MomentumMaceHitListener());
+        ctx.listeners().add(new MomentumMaceFallProtection());
     }
 }

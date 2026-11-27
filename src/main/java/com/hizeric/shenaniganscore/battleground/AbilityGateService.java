@@ -17,13 +17,16 @@ import java.util.UUID;
  */
 final class AbilityGateService {
     private final BattlegroundManager m;
+    private boolean registered;
 
     AbilityGateService(BattlegroundManager manager) {
         this.m = manager;
     }
 
-    /** Registers the only ability gate on the plugin's caster. */
+    /** Registers the only ability gate on the plugin's caster; idempotent. */
     void register() {
+        if (registered) return;
+        registered = true;
         m.plugin.getAbilityCaster().addGate((player, definition, source) -> {
             UUID uuid = player.getUniqueId();
             if (!m.isDeployed(uuid) && !m.staging.isStaged(player)) return CastResult.OK;

@@ -33,6 +33,8 @@ import com.hizeric.shenaniganscore.battleground.storage.DatabaseException;
 import com.hizeric.shenaniganscore.battleground.storage.Databases;
 import com.hizeric.shenaniganscore.core.ability.AbilityCaster;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
+import com.hizeric.shenaniganscore.core.ability.ListenerSink;
+import com.hizeric.shenaniganscore.core.ability.RegistrationContext;
 import com.hizeric.shenaniganscore.core.cooldown.CooldownManager;
 import com.hizeric.shenaniganscore.core.config.AbilityTuningConfig;
 import com.hizeric.shenaniganscore.core.config.ConfigAutoUpdater;
@@ -226,8 +228,11 @@ public final class ShenanigansCore extends JavaPlugin {
         // battleground catalog ownership and streak — never by a mana bar.
         this.abilityRegistry = new AbilityRegistry(message -> getLogger().warning(message));
         this.abilityCaster = new AbilityCaster(abilityRegistry, cooldownManager, getLogger());
-        JujutsuAbilities.register(abilityRegistry, readTechniqueFxEnabled(getDataFolder(), getLogger()));
-        MinecraftAbilities.register(abilityRegistry, this);
+        JujutsuAbilities.setTechniqueFxEnabled(readTechniqueFxEnabled(getDataFolder(), getLogger()));
+        ListenerSink listenerSink = listener -> getServer().getPluginManager().registerEvents(listener, this);
+        RegistrationContext registrationContext = new RegistrationContext(abilityRegistry, listenerSink, getLogger());
+        JujutsuAbilities.register(registrationContext);
+        MinecraftAbilities.register(registrationContext);
         getLogger().info("Registered " + abilityRegistry.size() + " abilities.");
 
         this.battlegroundManager = new BattlegroundManager(this);
