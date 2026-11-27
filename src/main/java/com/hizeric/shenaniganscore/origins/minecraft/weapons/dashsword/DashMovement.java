@@ -6,7 +6,8 @@ import org.bukkit.util.Vector;
  * Pure movement math for the Rift Cleave dash: steering blend, speed, decay and curved path.
  *
  * <p>No Bukkit state, scheduler or player access. The dash flies a 28-tick window: it keeps the
- * launch pitch, drifts its yaw to the right every tick, and loses speed as it goes.</p>
+ * launch pitch, drifts its yaw by {@link #YAW_DRIFT_DEGREES_PER_TICK} degrees every tick, and
+ * loses speed as it goes.</p>
  */
 public final class DashMovement {
 
@@ -16,7 +17,7 @@ public final class DashMovement {
     public static final double DEFAULT_STEERING_ALPHA = 0.0;
     /** Fraction of speed lost per tick (0 = constant speed). */
     public static final double DEFAULT_DECAY_PER_TICK = 0.035;
-    /** Yaw the path drifts to the right per tick, in degrees. */
+    /** Yaw the path drifts per tick, in degrees (sign/handedness deferred to playtest). */
     public static final double YAW_DRIFT_DEGREES_PER_TICK = 1.6;
 
     private DashMovement() { }

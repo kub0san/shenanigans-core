@@ -82,17 +82,14 @@ class DashMovementTest {
 
     @Test
     void distanceAfterUsesDecayedSteps() {
-        assertEquals(distanceAfter(28, 2.4, 0.035), distanceAfter(27, 2.4, 0.035)
-                + DashMovement.speed(2.4, 0.035, 28), 1e-9);
+        assertEquals(DashMovement.distanceAfter(28, 2.4, 0.035),
+                DashMovement.distanceAfter(27, 2.4, 0.035)
+                        + DashMovement.speed(2.4, 0.035, 28), 1e-9);
     }
 
     @Test
     void distanceAfterIsZeroWithoutTicks() {
-        assertEquals(0.0, distanceAfter(0, 2.4, 0.035), 1e-9);
-        assertEquals(0.0, distanceAfter(-5, 2.4, 0.035), 1e-9);
-    }
-
-    private static double distanceAfter(int ticks, double momentum, double decayPerTick) {
-        return DashMovement.distanceAfter(ticks, momentum, decayPerTick);
+        assertEquals(0.0, DashMovement.distanceAfter(0, 2.4, 0.035), 1e-9);
+        assertEquals(0.0, DashMovement.distanceAfter(-5, 2.4, 0.035), 1e-9);
     }
 }

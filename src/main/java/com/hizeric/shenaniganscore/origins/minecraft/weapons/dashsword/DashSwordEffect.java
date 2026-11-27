@@ -133,6 +133,9 @@ public final class DashSwordEffect {
             player.setVelocity(DashMovement.velocity(heading,
                     DashMovement.speed(FORWARD_MOMENTUM, DashMovement.DEFAULT_DECAY_PER_TICK, tick)));
 
+            // Both distanceAfter and pathOffset sum from t=1, but the first real step uses speed(0)
+            // (full momentum from applyMomentum), so the ideal point is ~0.08 blocks short at tick 1
+            // — harmless: the realized-travel clamp governs where the trail actually lands.
             double pathDistance = DashMovement.distanceAfter(tick, FORWARD_MOMENTUM,
                     DashMovement.DEFAULT_DECAY_PER_TICK);
             double trail = DashAnimation.trailDistance(pathDistance, current.distance(origin));
