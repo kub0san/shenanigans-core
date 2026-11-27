@@ -3,19 +3,21 @@ package com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword;
 import org.bukkit.util.Vector;
 
 /**
- * Pure movement math for the Rift Cleave dash: steering blend, speed and decay.
+ * Pure movement math for the Rift Cleave dash: steering blend, speed, decay and curved path.
  *
- * <p>No Bukkit state, scheduler or player access. Values are provisional until playtest;
- * the dash currently uses zero steering and zero decay, i.e. a locked straight line.</p>
+ * <p>No Bukkit state, scheduler or player access. The dash flies a 28-tick window: it keeps the
+ * launch pitch, drifts its yaw to the right every tick, and loses speed as it goes.</p>
  */
 public final class DashMovement {
 
-    /** Provisional forward speed (blocks/tick). */
-    public static final double DEFAULT_MOMENTUM = 2.6;
-    /** Provisional steering blend toward the look direction (0 = locked line). */
+    /** Forward speed at launch (blocks/tick). */
+    public static final double DEFAULT_MOMENTUM = 2.4;
+    /** Steering blend toward the look direction (0 = locked line). */
     public static final double DEFAULT_STEERING_ALPHA = 0.0;
-    /** Provisional speed decay per tick (0 = constant speed). */
-    public static final double DEFAULT_DECAY_PER_TICK = 0.0;
+    /** Fraction of speed lost per tick (0 = constant speed). */
+    public static final double DEFAULT_DECAY_PER_TICK = 0.035;
+    /** Yaw the path drifts to the right per tick, in degrees. */
+    public static final double YAW_DRIFT_DEGREES_PER_TICK = 1.6;
 
     private DashMovement() { }
 
@@ -46,5 +48,32 @@ public final class DashMovement {
             return new Vector(0, 0, 0);
         }
         return direction.clone().normalize().multiply(Math.max(0.0, speed));
+    }
+
+    /**
+     * Flight heading at {@code tick}: the launch direction flattened to the horizontal plane,
+     * normalized, then yawed right by {@link #YAW_DRIFT_DEGREES_PER_TICK} degrees per tick.
+     * Pitch is never changed. A vertical (or missing) launch direction falls back to {@code (1,0,0)}.
+     */
+    public static Vector headingAt(Vector launchForward, int tick) {
+        Vector base = launchForward == null ? new Vector(1, 0, 0) : launchForward.clone();
+        base.setY(0.0);
+        if (base.lengthSquared() < 1.0e-8) base = new Vector(1, 0, 0);
+        base.normalize();
+        double radians = Math.toRadians(YAW_DRIFT_DEGREES_PER_TICK * Math.max(0, tick));
+        double cos = Math.cos(radians);
+        double sin = Math.sin(radians);
+        double x = base.getX() * cos + base.getZ() * sin;
+        double z = base.getZ() * cos - base.getX() * sin;
+        return new Vector(x, 0.0, z).normalize();
+    }
+
+    /** Total distance covered over {@code ticks} ticks of decayed flight. */
+    public static double distanceAfter(int ticks, double momentum, double decayPerTick) {
+        double total = 0.0;
+        for (int tick = 1; tick <= ticks; tick++) {
+            total += speed(momentum, decayPerTick, tick);
+        }
+        return total;
     }
 }
