@@ -108,9 +108,17 @@ class DashAnimationTest {
 
         Vector turned = DashMovement.headingAt(north, 16);
         assertEquals(0.0f, DashAnimation.echoPitch(turned), 1e-6f,
-                "the path is horizontal, so echoes never pitch");
+                "a horizontal launch stays level, so its echoes never pitch");
         assertTrue(Math.abs(DashAnimation.echoYaw(turned)) > 1.0f,
                 "echo yaw must turn with the path, not stay at the cast heading");
+    }
+
+    @Test
+    void pitchedHeadingProducesNonzeroEchoPitch() {
+        // headingAt preserves pitch, so a nonzero-pitch launch must pitch its echoes too.
+        Vector h = DashMovement.headingAt(new Vector(0, -1, 1), 0);
+        assertEquals(45.0f, DashAnimation.echoPitch(h), 1e-4f,
+                "a nonzero-pitch heading must produce a nonzero echo pitch");
     }
 
     @Test
