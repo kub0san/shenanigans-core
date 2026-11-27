@@ -21,6 +21,9 @@ public final class DashAnimation {
 
     private static final Vector UP = new Vector(0, 1, 0);
 
+    /** Fraction of the decayed step a dash must still cover to count as moving, not stalled. */
+    private static final double STALL_DELTA = 0.05;
+
     public enum Kind {
         CLEAVE_BURST, RIFT_RIBBON, GHOST_ARC, WIND_CHARGE
     }
@@ -97,8 +100,18 @@ public final class DashAnimation {
     }
 
     /** A downward dash started on the ground and never airborne cannot move; abort it. */
-    public static boolean blockedGroundStart(double forwardY, boolean onGround, boolean airborneOnce) {
-        return forwardY < 0.0 && onGround && !airborneOnce;
+    public static boolean blockedGroundStart(double headingY, boolean onGround, boolean airborneOnce) {
+        return headingY < 0.0 && onGround && !airborneOnce;
+    }
+
+    /**
+     * True only when the dash has essentially frozen: the realized step has collapsed to a
+     * near-zero fraction of the decayed expected step. A slow-but-moving dash (e.g. 0.04 against
+     * a ~0.89 step at tick 28) is not stalled; only a total stop is. The threshold scales with the
+     * decayed step, so a late, slow dash is judged against its own (smaller) expected step.
+     */
+    public static boolean stalled(double moved, double expectedStep) {
+        return moved < expectedStep * STALL_DELTA * STALL_DELTA;
     }
 
     /** Only launch frames carry sound; the clamped trailing frames replay none. */
