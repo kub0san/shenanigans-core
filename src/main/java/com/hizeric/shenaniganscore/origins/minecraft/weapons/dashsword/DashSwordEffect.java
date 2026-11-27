@@ -28,11 +28,19 @@ public final class DashSwordEffect {
     private static final double FORWARD_MOMENTUM = DashMovement.DEFAULT_MOMENTUM;
     /** A one-tick move this far can only be a teleport or a round reset, not a dash step. */
     private static final double MAX_STEP = 8.0;
-    /** A stuck player keeps a large re-applied velocity while their position barely changes. */
-    private static final double STALL_DELTA = 0.05;
     private static final int STALL_TICKS = 2;
 
     private DashSwordEffect() { }
+
+    /**
+     * Single spawn gate for one timeline tick: spawn only when the dash is neither a blocked
+     * downward ground start nor a genuine stall. Pure — shared by {@link Timeline#run()} and tests.
+     */
+    public static boolean shouldSpawnAt(double headingY, boolean onGround, boolean airborneOnce,
+                                        double moved, double expectedStep) {
+        return !DashAnimation.blockedGroundStart(headingY, onGround, airborneOnce)
+                && !DashAnimation.stalled(moved, expectedStep);
+    }
 
     public static void launch(Player player) {
         ShenanigansCore plugin = ShenanigansCore.getInstance();
@@ -109,9 +117,15 @@ public final class DashSwordEffect {
             }
             if (!onGround) airborneOnce = true;
 
+            // The dash flies a fixed curve: heading yaws right every tick, speed decays. The path
+            // point is the ideal curve clamped to how far the player actually got (walls/ground).
+            Vector heading = DashMovement.headingAt(forward, tick);
+            double expectedStep = DashMovement.speed(FORWARD_MOMENTUM,
+                    DashMovement.DEFAULT_DECAY_PER_TICK, tick);
+
             // A downward dash launched from the ground that never left it cannot travel; abort
             // before any formulaic trail, echo or ribbon effects are spawned.
-            if (DashAnimation.blockedGroundStart(forward.getY(), onGround, airborneOnce)) {
+            if (DashAnimation.blockedGroundStart(heading.getY(), onGround, airborneOnce)) {
                 finish();
                 return;
             }
@@ -119,7 +133,7 @@ public final class DashSwordEffect {
             // Velocity is re-applied every tick, so a player stuck against a wall still carries a
             // large velocity while their position barely changes. Stall detection reads position.
             double moved = current.distance(lastPosition);
-            if (tick > 1 && moved < STALL_DELTA) stallTicks++;
+            if (tick > 1 && DashAnimation.stalled(moved, expectedStep)) stallTicks++;
             else stallTicks = 0;
             if (stallTicks >= STALL_TICKS) {
                 finish();
@@ -127,11 +141,7 @@ public final class DashSwordEffect {
             }
             lastPosition = current.clone();
 
-            // The dash flies a fixed curve: heading yaws right every tick, speed decays. The path
-            // point is the ideal curve clamped to how far the player actually got (walls/ground).
-            Vector heading = DashMovement.headingAt(forward, tick);
-            player.setVelocity(DashMovement.velocity(heading,
-                    DashMovement.speed(FORWARD_MOMENTUM, DashMovement.DEFAULT_DECAY_PER_TICK, tick)));
+            player.setVelocity(DashMovement.velocity(heading, expectedStep));
 
             // Both distanceAfter and pathOffset sum from t=1, but the first real step uses speed(0)
             // (full momentum from applyMomentum), so the ideal point is ~0.08 blocks short at tick 1
@@ -144,14 +154,18 @@ public final class DashSwordEffect {
             DashAnimation.Frame launchFrame = launch.get(Math.min(tick, launch.size() - 1));
             DashAnimation.Frame trailFrame = this.trail.get(Math.min(tick, this.trail.size() - 1));
 
-            if (launchFrame.swing()) player.swingMainHand();
-            for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn, point);
-            for (DashAnimation.Sound sound : DashAnimation.soundsForTick(tick)) play(sound);
+            // One gate before any visual spawn: a blocked ground start or a genuine stall emits no
+            // echoes, ribbon or wind for this tick (guards above still own finish()/clear()).
+            if (shouldSpawnAt(heading.getY(), onGround, airborneOnce, moved, expectedStep)) {
+                if (launchFrame.swing()) player.swingMainHand();
+                for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn, point);
+                for (DashAnimation.Sound sound : DashAnimation.soundsForTick(tick)) play(sound);
 
-            for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn, point, heading);
-            echoes.tick(tick);
-            visibility.tick();
-            wind.tick(tick, heading);
+                for (DashAnimation.DisplaySpawn spawn : trailFrame.spawns()) spawnEchoes(spawn, point, heading);
+                echoes.tick(tick);
+                visibility.tick();
+                wind.tick(tick, heading);
+            }
             tick++;
         }
 
