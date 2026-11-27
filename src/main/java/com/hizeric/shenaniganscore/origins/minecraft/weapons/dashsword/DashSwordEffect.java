@@ -33,13 +33,14 @@ public final class DashSwordEffect {
     private DashSwordEffect() { }
 
     /**
-     * Single spawn gate for one timeline tick: spawn only when the dash is neither a blocked
-     * downward ground start nor a genuine stall. Pure — shared by {@link Timeline#run()} and tests.
+     * Single spawn gate for one timeline tick: spawn unless this is a blocked downward ground
+     * start. The driver's early finish() guards already own stall handling, so the seam must not
+     * re-check stall (that would kill the tick-0/1 launch cue on a motionless first tick). Pure —
+     * shared by {@link Timeline#run()} and tests.
      */
     public static boolean shouldSpawnAt(double headingY, boolean onGround, boolean airborneOnce,
                                         double moved, double expectedStep) {
-        return !DashAnimation.blockedGroundStart(headingY, onGround, airborneOnce)
-                && !DashAnimation.stalled(moved, expectedStep);
+        return !DashAnimation.blockedGroundStart(headingY, onGround, airborneOnce);
     }
 
     public static void launch(Player player) {
@@ -125,7 +126,7 @@ public final class DashSwordEffect {
 
             // A downward dash launched from the ground that never left it cannot travel; abort
             // before any formulaic trail, echo or ribbon effects are spawned.
-            if (DashAnimation.blockedGroundStart(heading.getY(), onGround, airborneOnce)) {
+            if (DashAnimation.blockedGroundStart(forward.getY(), onGround, airborneOnce)) {
                 finish();
                 return;
             }
@@ -154,9 +155,9 @@ public final class DashSwordEffect {
             DashAnimation.Frame launchFrame = launch.get(Math.min(tick, launch.size() - 1));
             DashAnimation.Frame trailFrame = this.trail.get(Math.min(tick, this.trail.size() - 1));
 
-            // One gate before any visual spawn: a blocked ground start or a genuine stall emits no
-            // echoes, ribbon or wind for this tick (guards above still own finish()/clear()).
-            if (shouldSpawnAt(heading.getY(), onGround, airborneOnce, moved, expectedStep)) {
+            // One gate before any visual spawn: a blocked ground start emits no echoes, ribbon or
+            // wind for this tick (the finish() guards above still own teardown).
+            if (shouldSpawnAt(forward.getY(), onGround, airborneOnce, moved, expectedStep)) {
                 if (launchFrame.swing()) player.swingMainHand();
                 for (DashAnimation.DisplaySpawn spawn : launchFrame.spawns()) spawnLaunch(spawn, point);
                 for (DashAnimation.Sound sound : DashAnimation.soundsForTick(tick)) play(sound);

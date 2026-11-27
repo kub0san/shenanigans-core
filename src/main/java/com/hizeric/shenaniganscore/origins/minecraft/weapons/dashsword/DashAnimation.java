@@ -22,9 +22,9 @@ public final class DashAnimation {
     private static final Vector UP = new Vector(0, 1, 0);
 
     /**
-     * Base fraction for the stall threshold; the effective cutoff is {@code expectedStep *
-     * STALL_DELTA * STALL_DELTA} (≈0.0025 of the decayed step), so only a near-total freeze counts
-     * as stalled. Squared on purpose — see {@link #stalled}.
+     * Fraction of the decayed expected step below which the dash counts as stalled; the effective
+     * cutoff is {@code expectedStep * STALL_DELTA} (5% of the decayed step), so only a near-total
+     * freeze counts. See {@link #stalled}.
      */
     private static final double STALL_DELTA = 0.05;
 
@@ -109,13 +109,13 @@ public final class DashAnimation {
     }
 
     /**
-     * True only when the dash has essentially frozen: the realized step has collapsed to a
-     * near-zero fraction of the decayed expected step. A slow-but-moving dash (e.g. 0.04 against
-     * a ~0.89 step at tick 28) is not stalled; only a total stop is. The threshold scales with the
-     * decayed step, so a late, slow dash is judged against its own (smaller) expected step.
+     * True only when the dash has essentially frozen: the realized step has collapsed below 5% of
+     * the decayed expected step. A slow-but-moving dash (e.g. 0.2 against a ~0.89 step at tick 28)
+     * is not stalled; only a near-total stop is. The threshold scales with the decayed step, so a
+     * late, slow dash is judged against its own (smaller) expected step.
      */
     public static boolean stalled(double moved, double expectedStep) {
-        return moved < expectedStep * STALL_DELTA * STALL_DELTA;
+        return moved < expectedStep * STALL_DELTA;
     }
 
     /** Only launch frames carry sound; the clamped trailing frames replay none. */
