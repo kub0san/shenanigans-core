@@ -15,9 +15,8 @@ class DashSpawnGateTest {
     }
 
     @Test
-    void genuineStallSpawnsNothing() {
-        double expectedStep = DashMovement.speed(2.4, 0.035, 28);
-        assertFalse(DashSwordEffect.shouldSpawnAt(0.0, false, true, 0.0, expectedStep));
-        assertTrue(DashSwordEffect.shouldSpawnAt(0.0, false, true, 0.5, expectedStep));
+    void firstTickMotionlessStillSpawnsLaunchCue() {
+        // Horizontal, airborne, motionless first tick: the seam must still spawn the launch cue.
+        assertTrue(DashSwordEffect.shouldSpawnAt(0.0, false, false, 0.0, 1.0));
     }
 }

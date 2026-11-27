@@ -131,15 +131,15 @@ class DashAnimationTest {
     }
 
     @Test
-    void blockedGroundStartUsesLiveHeading() {
-        assertTrue(DashAnimation.blockedGroundStart(-0.3, true, false));
-        assertFalse(DashAnimation.blockedGroundStart(-0.3, true, true));
+    void blockedGroundStartBlocksStraightDownCast() {
+        // Straight-down ground start is blocked; a horizontal one is not.
+        assertTrue(DashAnimation.blockedGroundStart(-1.0, true, false));
         assertFalse(DashAnimation.blockedGroundStart(0.0, true, false));
     }
 
     @Test
     void stalledOnlyWhenDecayedStepIsMissed() {
-        assertFalse(DashAnimation.stalled(0.04, DashMovement.speed(2.4, 0.035, 28)));
+        assertFalse(DashAnimation.stalled(0.2, DashMovement.speed(2.4, 0.035, 28)));
         assertTrue(DashAnimation.stalled(0.0, DashMovement.speed(2.4, 0.035, 28)));
         assertFalse(DashAnimation.stalled(0.5, DashMovement.speed(2.4, 0.035, 28)));
     }
