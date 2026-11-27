@@ -90,6 +90,36 @@ class DashAnimationTest {
     }
 
     @Test
+    void soundCuesStayAtZeroOneTenUnderDecay() {
+        assertEquals(List.of(0, 1, 10), soundTicks());
+        assertFalse(DashAnimation.soundsForTick(1).isEmpty());
+    }
+
+    @Test
+    void clampedTailDoesNotReplaySounds() {
+        assertTrue(DashAnimation.soundsForTick(21).isEmpty());
+    }
+
+    @Test
+    void decayedDistanceDoesNotMoveTheSoundBeats() {
+        double accumulated = DashMovement.distanceAfter(16, 2.4, 0.035);
+        assertEquals(accumulated, DashAnimation.trailDistance(accumulated, 999.0), 1e-9);
+        assertFalse(DashAnimation.soundsForTick(1).isEmpty(),
+                "decay math must not silence the tick-1 cue");
+        assertTrue(DashAnimation.soundsForTick(21).isEmpty(),
+                "decay math must not add a cue in the clamped tail");
+    }
+
+    /** Test-local: ticks 0..28 that emit a sound cue. */
+    private static List<Integer> soundTicks() {
+        List<Integer> ticks = new java.util.ArrayList<>();
+        for (int tick = 0; tick <= DashAnimation.TRAIL_TICKS; tick++) {
+            if (!DashAnimation.soundsForTick(tick).isEmpty()) ticks.add(tick);
+        }
+        return ticks;
+    }
+
+    @Test
     void trailDistanceUsesAccumulatedDecayedDistance() {
         double d = DashMovement.distanceAfter(16, 2.4, 0.035);
         assertEquals(d, DashAnimation.trailDistance(d, 999.0), 1e-9);
