@@ -8,12 +8,9 @@ import com.hizeric.shenaniganscore.core.display.CameraShake;
 import com.hizeric.shenaniganscore.core.display.DisplayRig;
 import com.hizeric.shenaniganscore.core.display.DisplayUtils;
 import com.hizeric.shenaniganscore.core.display.LightingRig;
-import com.hizeric.shenaniganscore.core.display.TechniqueDisplayOps;
 import com.hizeric.shenaniganscore.core.display.TechniqueLighting;
-import com.hizeric.shenaniganscore.core.display.TitleAnimator;
 import com.hizeric.shenaniganscore.core.display.TransformUtils;
 import com.hizeric.shenaniganscore.core.sound.SoundUtils;
-import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -25,7 +22,6 @@ import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.TextDisplay;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 import org.joml.Vector3f;
@@ -34,6 +30,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Thin Bukkit display driver for the Executioner's Axe: a heavy uppercut slash and the
@@ -43,7 +41,29 @@ public final class ExecutionerSwordEffect {
 
     public static final int CUTSCENE_TICKS = 24;
 
+    /** Live timelines are owned here so plugin disable can finish them before cancelTasks. */
+    private interface ActiveEffect {
+        void finish();
+    }
+
+    private static final Set<ActiveEffect> ACTIVE = ConcurrentHashMap.newKeySet();
+
     private ExecutionerSwordEffect() { }
+
+    /**
+     * Finish every live cutscene before the plugin's task sweep. Idempotent: each timeline
+     * deregisters itself in finish(), and the stable copy keeps the iteration safe.
+     */
+    public static void shutdown() {
+        for (ActiveEffect effect : new ArrayList<>(ACTIVE)) {
+            try {
+                effect.finish();
+            } catch (Throwable ignored) {
+                // One broken timeline must not strand the rest of plugin teardown.
+            }
+        }
+        ACTIVE.clear();
+    }
 
     // ------------------------------------------------------------------ uppercut
 
@@ -59,7 +79,7 @@ public final class ExecutionerSwordEffect {
         // Launch sound plays at the launch moment, not the hit tick.
         SoundUtils.play(target.getLocation(), Sound.BLOCK_ANVIL_LAND, 0.35f, 0.6f);
 
-        new UppercutTimeline(plugin, caster, target).runTaskTimer(plugin, 0L, 1L);
+        new UppercutTimeline(plugin, caster, target).start();
     }
 
     // ------------------------------------------------------------------ execute
@@ -87,7 +107,7 @@ public final class ExecutionerSwordEffect {
         }
 
         new ExecuteTimeline(plugin, caster, target, savedVelocity, savedNoDamageTicks,
-                roundActiveAtStart).runTaskTimer(plugin, 0L, 1L);
+                roundActiveAtStart).start();
     }
 
     // ================================================================== uppercut timeline
@@ -99,10 +119,11 @@ public final class ExecutionerSwordEffect {
     private static final Particle.DustOptions CRIMSON_DUST =
             new Particle.DustOptions(Color.fromRGB(150, 0, 12), 1.2f);
 
-    private static final class UppercutTimeline extends BukkitRunnable {
+    private static final class UppercutTimeline extends BukkitRunnable implements ActiveEffect {
         private final ShenanigansCore plugin;
         private final Player caster;
         private final LivingEntity target;
+        private boolean scheduled;
 
         // Two-layer main blade: white-hot core + wider red-glass glow.
         private BlockDisplay core;
@@ -152,6 +173,23 @@ public final class ExecutionerSwordEffect {
             Vector rightDir = rotateY(forward, -55.0);
             spawnCrossBlade(chest, leftDir, coreOpts, glowOpts);
             spawnCrossBlade(chest, rightDir, coreOpts, glowOpts);
+            ACTIVE.add(this);
+        }
+
+        void start() {
+            runTaskTimer(plugin, 0L, 1L);
+            scheduled = true;
+        }
+
+        /** Idempotent teardown: the first caller removes ownership and cleans up. */
+        @Override
+        public void finish() {
+            if (!ACTIVE.remove(this)) return;
+            try {
+                cleanup();
+            } finally {
+                if (scheduled) cancel();
+            }
         }
 
         @Override
@@ -160,8 +198,7 @@ public final class ExecutionerSwordEffect {
                     || !caster.isOnline() || caster.isDead()
                     || !target.isValid() || target.isDead()
                     || !caster.getWorld().equals(target.getWorld())) {
-                cleanup();
-                cancel();
+                finish();
                 return;
             }
 
@@ -274,15 +311,12 @@ public final class ExecutionerSwordEffect {
 
     // ================================================================== execute timeline
 
-    private static final class ExecuteTimeline extends BukkitRunnable {
+    private static final class ExecuteTimeline extends BukkitRunnable implements ActiveEffect {
         private static final Vector3f PIVOT = new Vector3f(0.5f, 0.5f, 0.5f);
         private static final Color RED_GLOW = Color.fromRGB(200, 20, 20);
-        private static final TextColor SEAL_TEXT = TextColor.color(139, 0, 0);
         private static final double RING_RADIUS = 1.9;
         private static final double RING_Y = 0.06;
         private static final int RING_SEGMENTS = 24;
-        /** Cardinal unit offsets (x, z) for the four seal glyphs. */
-        private static final double[][] CARDINALS = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}};
 
         /** One entity + fake-light registry so cleanup is a single pass. */
         private static final class Rig implements DisplayRig, LightingRig {
@@ -312,7 +346,6 @@ public final class ExecutionerSwordEffect {
 
         // Typed handles for per-beat animation (all also registered on the rig).
         private final List<BlockDisplay> ring = new ArrayList<>();
-        private final List<TextDisplay> seals = new ArrayList<>();
         private final List<BlockDisplay> bladeCores = new ArrayList<>();
         private final List<BlockDisplay> bladeGlows = new ArrayList<>();
         private final List<BlockDisplay> shards = new ArrayList<>();
@@ -322,6 +355,7 @@ public final class ExecutionerSwordEffect {
 
         private Location anchor;
         private boolean killed = false;
+        private boolean scheduled;
         private int tick;
 
         ExecuteTimeline(ShenanigansCore plugin, Player caster, Player target, Vector savedVelocity,
@@ -334,21 +368,38 @@ public final class ExecutionerSwordEffect {
             this.roundActiveAtStart = roundActiveAtStart;
             this.world = target.getWorld();
             this.anchor = target.getLocation().clone();
+            ACTIVE.add(this);
+        }
+
+        void start() {
+            runTaskTimer(plugin, 0L, 1L);
+            scheduled = true;
+        }
+
+        /** Idempotent teardown: the first caller removes ownership and cleans up. */
+        @Override
+        public void finish() {
+            if (!ACTIVE.remove(this)) return;
+            try {
+                cleanup();
+            } finally {
+                if (scheduled) cancel();
+            }
         }
 
         @Override
         public void run() {
             // abort guards
-            if (!plugin.isEnabled()) { cleanup(); cancel(); return; }
-            if (!caster.isOnline() || caster.isDead()) { cleanup(); cancel(); return; }
-            if (!target.isOnline()) { cleanup(); cancel(); return; }
-            if (!killed && target.isDead()) { cleanup(); cancel(); return; }
-            if (!caster.getWorld().equals(target.getWorld())) { cleanup(); cancel(); return; }
+            if (!plugin.isEnabled()) { finish(); return; }
+            if (!caster.isOnline() || caster.isDead()) { finish(); return; }
+            if (!target.isOnline()) { finish(); return; }
+            if (!killed && target.isDead()) { finish(); return; }
+            if (!caster.getWorld().equals(target.getWorld())) { finish(); return; }
             if (roundActiveAtStart) {
                 BattlegroundManager mgr = plugin.getBattlegroundManager();
-                if (mgr == null) { cleanup(); cancel(); return; }
+                if (mgr == null) { finish(); return; }
                 RoundState st = mgr.state();
-                if (st != RoundState.RUNNING && st != RoundState.WARNING) { cleanup(); cancel(); return; }
+                if (st != RoundState.RUNNING && st != RoundState.WARNING) { finish(); return; }
             }
 
             if (target.isOnline()) anchor = target.getLocation().clone();
@@ -362,9 +413,6 @@ public final class ExecutionerSwordEffect {
                 spawnRing();
                 lightBurst(2.0);
                 SoundUtils.play(anchor.clone(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 0.6f, 0.5f);
-            }
-            if (tick == 2) {
-                spawnSeals();
             }
             if (tick == 4) {
                 spawnBlades();
@@ -396,23 +444,15 @@ public final class ExecutionerSwordEffect {
             if (tick == 18) {
                 SoundUtils.play(anchor.clone(), Sound.ENTITY_ITEM_BREAK, 0.8f, 0.9f);
             }
-            if (tick == 20) {
-                for (TextDisplay s : seals) discard(s);
-                seals.clear();
-            }
-
             // ---- animate ----
             animateRing();
-            animateSeals();
             animateBlades();
             animateCut();
-            if (tick >= 14 && tick <= 23) animateVerdict();
             animateShards();
 
             tick++;
             if (tick > CUTSCENE_TICKS) {
-                cleanup();
-                cancel();
+                finish();
             }
         }
 
@@ -431,14 +471,6 @@ public final class ExecutionerSwordEffect {
                 ring.add(bd);
                 Vector3f radial = new Vector3f((float) Math.cos(base), 0f, (float) Math.sin(base));
                 TransformUtils.applyFacing(bd, new Vector3f(0.05f, 0.03f, 0.5f), radial, PIVOT, 1);
-            }
-        }
-
-        private void spawnSeals() {
-            for (double[] dir : CARDINALS) {
-                Location loc = anchor.clone().add(dir[0] * 2.2, 1.2, dir[1] * 2.2);
-                TextDisplay td = TechniqueDisplayOps.spawnGlyph(rig, loc, "斬", SEAL_TEXT, 0.6f);
-                seals.add(td);
             }
         }
 
@@ -507,28 +539,6 @@ public final class ExecutionerSwordEffect {
             }
         }
 
-        private void animateSeals() {
-            if (seals.isEmpty()) return;
-            double p = clamp01((tick - 2) / 10.0); // converge t2 → t12
-            double chestY = anchor.getY() + 1.0;
-            double roll = Math.toRadians(tick * 4.0);
-            for (int i = 0; i < seals.size(); i++) {
-                TextDisplay td = seals.get(i);
-                if (td == null || !td.isValid()) continue;
-                double[] dir = CARDINALS[i];
-                double sx = anchor.getX() + dir[0] * 2.2;
-                double sz = anchor.getZ() + dir[1] * 2.2;
-                double x = sx + (anchor.getX() - sx) * p;
-                double z = sz + (anchor.getZ() - sz) * p;
-                Location to = new Location(world, x, anchor.getY() + 1.2 + (chestY - (anchor.getY() + 1.2)) * p, z);
-                TechniqueDisplayOps.moveDisplay(td, to, 0.6f, (float) roll);
-                if (tick >= 14) {
-                    double fp = clamp01((tick - 14) / 6.0); // fade t14 → t20
-                    td.setTextOpacity((byte) Math.max(0, Math.round(255 * (1.0 - fp))));
-                }
-            }
-        }
-
         private void animateBlades() {
             if (bladeCores.isEmpty()) return;
             double p = clamp01((tick - 4) / 12.0); // orbit radius 2.4 → 0 over t4..t16
@@ -575,21 +585,6 @@ public final class ExecutionerSwordEffect {
                     new Vector3f(coreThick, coreThick, length), rd, PIVOT, 1);
             TransformUtils.applyFacing(cutGlow,
                     new Vector3f(glowThick, glowThick, length), rd, PIVOT, 1);
-        }
-
-        private void animateVerdict() {
-            // TitleAnimator reveals ~0.12s per glyph; compress the reveal to fit the 10-tick
-            // verdict window (t14..23) instead of showing only "FINA".
-            double elapsed = (tick - 14) * 0.22;
-            boolean last = tick >= 22;
-            var title = TitleAnimator.build("FINAL VERDICT", "終末の裁き", "Final Verdict", elapsed, last);
-            caster.showTitle(title);
-            for (Player pl : world.getPlayers()) {
-                if (pl.equals(caster)) continue;
-                if (pl.getLocation().distanceSquared(anchor) <= 144.0) {
-                    pl.showTitle(title);
-                }
-            }
         }
 
         private void animateShards() {
@@ -652,7 +647,6 @@ public final class ExecutionerSwordEffect {
             }
 
             ring.clear();
-            seals.clear();
             bladeCores.clear();
             bladeGlows.clear();
             shards.clear();

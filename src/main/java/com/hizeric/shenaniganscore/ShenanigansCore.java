@@ -54,6 +54,7 @@ import com.hizeric.shenaniganscore.origins.jujutsukaisen.JujutsuAbilities;
 import com.hizeric.shenaniganscore.origins.minecraft.MinecraftAbilities;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.DashVisibilityMask;
 import com.hizeric.shenaniganscore.origins.minecraft.weapons.dashsword.MannequinEchoRenderer;
+import com.hizeric.shenaniganscore.origins.minecraft.weapons.executionsword.ExecutionerSwordEffect;
 import com.hizeric.shenaniganscore.resourcepack.ResourcePackManager;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.Bukkit;
@@ -421,6 +422,9 @@ public final class ShenanigansCore extends JavaPlugin {
         // Same reason as the echoes: cancelTasks below kills dash timelines without running
         // their clear(), so any live visibility mask must be restored first.
         runSafely("dash visibility", () -> DashVisibilityMask.shutdown());
+        // cancelTasks below would kill the Executioner timelines without removing their displays
+        // or restoring a frozen target, so finish them while the world is still usable.
+        runSafely("executioner cutscenes", () -> ExecutionerSwordEffect.shutdown());
         runSafely("gui", () -> {
             if (battlegroundGui != null) battlegroundGui.shutdown();
         });
