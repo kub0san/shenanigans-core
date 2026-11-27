@@ -131,6 +131,18 @@ class DashAnimationTest {
     }
 
     @Test
+    void blockedGroundStartUsesLiveHeading() {
+        assertTrue(DashAnimation.blockedGroundStart(-0.3, true, false));
+        assertFalse(DashAnimation.blockedGroundStart(-0.3, true, true));
+        assertFalse(DashAnimation.blockedGroundStart(0.0, true, false));
+    }
+
+    @Test
+    void stalledOnlyWhenDecayedStepIsMissed() {
+        assertFalse(DashAnimation.stalled(0.04, DashMovement.speed(2.4, 0.035, 28)));
+    }
+
+    @Test
     void swingIsOnlyOnTickZeroAndNoLaunchFrameRequestsShake() {
         List<Integer> swings = DashAnimation.launch().stream()
                 .filter(DashAnimation.Frame::swing).map(DashAnimation.Frame::tick).toList();
