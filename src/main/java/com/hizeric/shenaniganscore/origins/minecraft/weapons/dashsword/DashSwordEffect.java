@@ -23,8 +23,8 @@ import java.util.List;
  */
 public final class DashSwordEffect {
 
-    private static final double FORWARD_MOMENTUM = 2.6;
-
+    // Motion math lives in DashMovement; these are provisional defaults until playtest.
+    private static final double FORWARD_MOMENTUM = DashMovement.DEFAULT_MOMENTUM;
     /** A one-tick move this far can only be a teleport or a round reset, not a dash step. */
     private static final double MAX_STEP = 8.0;
     /** A stuck player keeps a large re-applied velocity while their position barely changes. */
@@ -47,7 +47,8 @@ public final class DashSwordEffect {
 
     private static void applyMomentum(Player player, Vector direction) {
         // No lift, no downward clamp: looking down dashes down. Re-applied every timeline tick.
-        player.setVelocity(direction.clone().multiply(FORWARD_MOMENTUM));
+        player.setVelocity(DashMovement.velocity(direction,
+                DashMovement.speed(FORWARD_MOMENTUM, DashMovement.DEFAULT_DECAY_PER_TICK, 0)));
         player.setFallDistance(0.0f);
         player.setSprinting(true);
     }
@@ -133,7 +134,8 @@ public final class DashSwordEffect {
             double trail = DashAnimation.trailDistance(tick, FORWARD_MOMENTUM, current.distance(origin));
 
             // Gravity and knockback must not bend the locked path — including a downward dash.
-            player.setVelocity(forward.clone().multiply(FORWARD_MOMENTUM));
+            player.setVelocity(DashMovement.velocity(forward,
+                    DashMovement.speed(FORWARD_MOMENTUM, DashMovement.DEFAULT_DECAY_PER_TICK, tick)));
 
             DashAnimation.Frame launchFrame = launch.get(Math.min(tick, launch.size() - 1));
             DashAnimation.Frame trailFrame = this.trail.get(Math.min(tick, this.trail.size() - 1));
