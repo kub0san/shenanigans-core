@@ -58,9 +58,26 @@ class DashMovementTest {
 
     @Test
     void headingAtStaysNormalized() {
-        Vector h = DashMovement.headingAt(new Vector(0.3, 0.9, -0.4), 13);
+        Vector launch = new Vector(0.3, 0.9, -0.4);
+        Vector h = DashMovement.headingAt(launch, 13);
         assertEquals(1.0, h.length(), 1e-9);
-        assertEquals(0.0, h.getY(), 1e-9);
+        assertEquals(launch.clone().normalize().getY(), h.getY(), 1e-9);
+    }
+
+    @Test
+    void headingAtPreservesPitchAndDriftsYaw() {
+        Vector launch = new Vector(0, -1, 1);
+        double expectedY = -1.0 / Math.sqrt(2.0);
+
+        Vector start = DashMovement.headingAt(launch, 0);
+        assertEquals(expectedY, start.getY(), 1e-9);
+        assertEquals(0.0, start.getX(), 1e-9);
+        assertEquals(1.0 / Math.sqrt(2.0), start.getZ(), 1e-9);
+
+        Vector later = DashMovement.headingAt(launch, 28);
+        assertEquals(expectedY, later.getY(), 1e-9);
+        assertEquals(44.8, Math.toDegrees(Math.atan2(later.getX(), later.getZ())), 0.1);
+        assertEquals(1.0, later.length(), 1e-9);
     }
 
     @Test
