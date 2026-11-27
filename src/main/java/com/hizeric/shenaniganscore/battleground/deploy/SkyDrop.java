@@ -48,6 +48,8 @@ public final class SkyDrop {
     // physical state begin() changed, even when the task has already stopped (e.g. finish()).
     private final Map<UUID, BukkitTask> tasks = new HashMap<>();
     private final Map<UUID, Map<Display, Long>> displaysByUuid = new HashMap<>();
+    /** Hard upper bound on live display entities per dive (Starfall Lock #9). */
+    private static final int MAX_DISPLAY_POOL = 32;
     private final Map<UUID, Player> players = new HashMap<>();
 
     public SkyDrop(Plugin plugin, DiveService dives, LiquidContactHandler liquidHandler,
@@ -269,18 +271,44 @@ public final class SkyDrop {
             if (sound != null) world.playSound(at, sound, cue.volume(), cue.pitch());
         }
         for (DropAnimation.Display display : frame.displays()) {
-            TextDisplay text = world.spawn(new Location(world, display.x(), display.y(), display.z()),
-                    TextDisplay.class, entity -> {
-                        entity.setText(display.text());
-                        entity.setBillboard(Display.Billboard.CENTER);
-                        entity.setSeeThrough(true);
-                        entity.setShadowed(true);
-                        entity.setViewRange(64f);
-                        float scale = display.scale();
-                        entity.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
-                                new Vector3f(scale, scale, scale), new Quaternionf()));
-                    });
-            despawnAtTick.put(text, world.getGameTime() + display.lifeTicks());
+            // Reuse a display whose despawn time has passed instead of spawning a new one;
+            // hard-cap the live pool at MAX_DISPLAY_POOL to bound entity churn per dive.
+            TextDisplay reused = null;
+            long now = world.getGameTime();
+            for (Map.Entry<Display, Long> entry : despawnAtTick.entrySet()) {
+                if (entry.getValue() <= now && entry.getKey() instanceof TextDisplay td
+                        && td.isValid()) {
+                    reused = td;
+                    break;
+                }
+            }
+            if (reused == null && despawnAtTick.size() >= MAX_DISPLAY_POOL) {
+                // Pool full: skip this beat's display rather than growing unbounded.
+                continue;
+            }
+            final TextDisplay text;
+            if (reused != null) {
+                despawnAtTick.remove(reused);
+                reused.teleport(new Location(world, display.x(), display.y(), display.z()));
+                reused.setText(display.text());
+                float scale = display.scale();
+                reused.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
+                        new Vector3f(scale, scale, scale), new Quaternionf()));
+                text = reused;
+            } else {
+                text = world.spawn(new Location(world, display.x(), display.y(), display.z()),
+                        TextDisplay.class, entity -> {
+                            entity.setText(display.text());
+                            entity.setBillboard(Display.Billboard.CENTER);
+                            entity.setSeeThrough(true);
+                            entity.setShadowed(true);
+                            entity.setViewRange(64f);
+                            float scale = display.scale();
+                            entity.setTransformation(new Transformation(new Vector3f(), new Quaternionf(),
+                                    new Vector3f(scale, scale, scale), new Quaternionf()));
+                        });
+            }
+            despawnAtTick.put(text, now + display.lifeTicks());
         }
     }
 
