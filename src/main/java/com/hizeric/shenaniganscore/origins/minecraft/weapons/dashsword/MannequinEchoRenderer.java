@@ -63,7 +63,9 @@ public final class MannequinEchoRenderer {
     private final ItemProfile skin;
     private final Map<Integer, Echo> echoes = new LinkedHashMap<>();
     private final Map<UUID, Viewer> viewers = new HashMap<>();
-    private final EchoCapability capability = new EchoCapability();
+    // One flag per classloader/server-session so the one-shot warning is truly global and
+    // shutdown()'s reset() is meaningful (not per-dash dead state).
+    private static final EchoCapability CAPABILITY = new EchoCapability();
     private boolean closed;
 
     public MannequinEchoRenderer(Player caster) {
@@ -92,8 +94,18 @@ public final class MannequinEchoRenderer {
 
     /** Spawn one static echo at {@code point}, facing the same way as the caster at spawn time. */
     public void spawn(Location point, float yaw, float pitch, int bornTick) {
-        if (closed || capability.disabled()) return;
-        PacketEventsBridge.requireReady();
+        if (closed || CAPABILITY.disabled()) return;
+        // requireReady() throws when PacketEvents is not initialized; that must trip the flag
+        // and tear down (not escape into the dash runnable, which would skip finish()/clear()).
+        try {
+            PacketEventsBridge.requireReady();
+        } catch (IllegalStateException t) {
+            if (!closed && CAPABILITY.trip(t)) {
+                logDisabled("readiness check", t);
+                close();
+            }
+            return;
+        }
         syncViewers();
         if (closed) return;
         Echo echo = new Echo(SpigotReflectionUtil.generateEntityId(), UUID.randomUUID(),
@@ -104,6 +116,7 @@ public final class MannequinEchoRenderer {
         for (Viewer viewer : new ArrayList<>(viewers.values())) {
             if (closed) break;
             ensureTeam(viewer);
+            if (closed) break;
             sendSpawn(viewer.player, echo);
             sendMeta(viewer.player, echo);
             sendTeam(viewer.player, WrapperPlayServerTeams.TeamMode.ADD_ENTITIES, echo.uuid.toString());
@@ -113,7 +126,7 @@ public final class MannequinEchoRenderer {
 
     /** Drop the echoes that reached {@link DashAnimation#GHOST_LIFE}; survivors stay full size. */
     public void tick(int currentTick) {
-        if (closed || capability.disabled() || !PacketEventsBridge.isReady()) return;
+        if (closed || CAPABILITY.disabled() || !PacketEventsBridge.isReady()) return;
         syncViewers();
         if (closed) return;
         for (Echo echo : new ArrayList<>(echoes.values())) {
@@ -152,14 +165,14 @@ public final class MannequinEchoRenderer {
                 // Teardown must never abort other cleanup hooks.
             }
             // Re-enable the capability so a same-classloader reload starts fresh.
-            renderer.capability.reset();
+            renderer.CAPABILITY.reset();
         }
     }
 
     // ------------------------------------------------------------------ viewers
 
     private void syncViewers() {
-        if (capability.disabled()) return;
+        if (CAPABILITY.disabled()) return;
         if (caster == null || !caster.isOnline()) return;
         World world = caster.getWorld();
         Location here = caster.getLocation();
@@ -266,16 +279,20 @@ public final class MannequinEchoRenderer {
         } catch (Throwable t) {
             // First failure trips the capability once, logs a single warning and tears down the
             // echoes for this dash; later failures stay silent so a broken metadata path cannot
-            // spam the log every packet.
-            if (capability.trip(t)) {
-                ShenanigansCore plugin = ShenanigansCore.getInstance();
-                if (plugin != null) {
-                    plugin.getLogger().warning("Mannequin echo packets disabled for this dash after a "
-                            + "send failure to " + player.getName() + ": " + t.getMessage());
-                }
+            // spam the log every packet. A teardown send failure (!closed) must not warn.
+            if (!closed && CAPABILITY.trip(t)) {
+                logDisabled("send failure to " + player.getName(), t);
                 close();
             }
         }
+    }
+
+    /** Single warning for the one-shot disable transition; null-safe and includes the type. */
+    private void logDisabled(String context, Throwable t) {
+        ShenanigansCore plugin = ShenanigansCore.getInstance();
+        if (plugin == null) return;
+        plugin.getLogger().warning("Mannequin echo packets disabled for this dash after a "
+                + context + ": " + t.getClass().getSimpleName() + ": " + t.getMessage());
     }
 
     // ------------------------------------------------------------------ state
