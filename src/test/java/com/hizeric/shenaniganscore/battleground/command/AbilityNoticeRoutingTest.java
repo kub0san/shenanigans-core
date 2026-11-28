@@ -13,20 +13,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Issue #73: every one-shot {@code /ability} denial and caster failure keeps its exact text but
- * arrives as a subtitle notice instead of a chat reply. The command tree has no live test seam for
- * {@code ctx.player()}, so both files are pinned at the source level — the same style as
- * {@code IndicatorRouterContractTest}.
+ * Issue #73: every one-shot denial and caster failure keeps its exact text but arrives as a
+ * subtitle notice instead of a chat reply. The command tree has no live test seam for
+ * {@code ctx.player()}, so the files are pinned at the source level — the same style as
+ * {@code IndicatorRouterContractTest}. Since Task 2 the cast service owns the denial switch and
+ * {@code /ability} only submits a request; source location is not behavior, text routing is.
  */
 class AbilityNoticeRoutingTest {
 
     private static final Path COMMAND = Path.of("src", "main", "java", "com", "hizeric",
             "shenaniganscore", "battleground", "command", "AbilityCommand.java");
+    private static final Path SERVICE = Path.of("src", "main", "java", "com", "hizeric",
+            "shenaniganscore", "core", "ability", "CastTriggerService.java");
     private static final Path CASTER = Path.of("src", "main", "java", "com", "hizeric",
             "shenaniganscore", "core", "ability", "AbilityCaster.java");
 
-    /** Every denial/cooldown message the command can emit, including both held-item slot paths. */
-    private static final List<String> COMMAND_DENIALS = List.of(
+    /** Every denial/cooldown message the cast service can emit, including both held-item paths. */
+    private static final List<String> SERVICE_DENIALS = List.of(
             "<yellow>Hold your custom item to use slot <white>1<yellow>.",
             "<yellow> is empty. Bind one from the hub's <white>Loadout<yellow> screen.",
             "<yellow>Need <white>",
@@ -51,18 +54,31 @@ class AbilityNoticeRoutingTest {
             "<red>You cannot use that ability right now.");
 
     @Test
-    void everyCommandDenialKeepsItsTextAndGoesToShowNotice() throws IOException {
-        String source = Files.readString(COMMAND, StandardCharsets.UTF_8);
+    void everyDenialKeepsItsTextAndReachesShowNoticeInTheService() throws IOException {
+        String service = Files.readString(SERVICE, StandardCharsets.UTF_8);
 
-        for (String denial : COMMAND_DENIALS) {
-            assertTrue(source.contains(denial), "denial text changed or was lost: " + denial);
+        for (String denial : SERVICE_DENIALS) {
+            assertTrue(service.contains(denial), "denial text changed or was lost: " + denial);
         }
-        assertEquals(2, count(source, "<yellow>Hold your custom item to use slot <white>1<yellow>."),
+        assertEquals(2, count(service, "<yellow>Hold your custom item to use slot <white>1<yellow>."),
                 "both empty-held-slot paths must still send their message");
-        assertFalse(source.contains("ctx.reply("),
-                "no /ability denial may still go to chat; use TechniqueHud.showNotice");
-        assertEquals(10, count(source, "TechniqueHud.showNotice("),
-                "every one of the 10 denial/cooldown replies must route to the notice sink");
+        assertEquals(1, count(service, "TechniqueHud.showNotice("),
+                "the cast service is the single notice producer for casts");
+    }
+
+    @Test
+    void commandSubmitsToTheServiceWithoutItsOwnNoticeSwitch() throws IOException {
+        String command = Files.readString(COMMAND, StandardCharsets.UTF_8);
+
+        assertTrue(command.contains("plugin.getCastTriggerService().submit("),
+                "/ability must submit a request to the cast service");
+        assertTrue(command.contains("CastRequest(player, slot, CastSource.COMMAND)"),
+                "the request must carry the slot and the command source");
+        assertFalse(command.contains("TechniqueHud.showNotice("),
+                "the command must not produce notices; the service owns denial routing");
+        assertFalse(command.contains("ctx.reply("), "no /ability denial may still go to chat");
+        assertFalse(command.contains("CastInput.decide("),
+                "the command must not duplicate the service's decision");
     }
 
     @Test
