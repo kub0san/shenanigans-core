@@ -1,7 +1,22 @@
 package com.hizeric.shenaniganscore.battleground.ability;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.kyori.adventure.title.Title;
+import org.bukkit.entity.Player;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockbukkit.mockbukkit.MockBukkit;
 
+import java.io.IOException;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,6 +26,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** M7: a "not ready" nudge must outlive the 5-tick HUD refresh that currently overwrites it. */
 class ActionBarNoticeTest {
+
+    private static final PlainTextComponentSerializer PLAIN = PlainTextComponentSerializer.plainText();
+    private static final Path HUD = Path.of("src", "main", "java", "com", "hizeric",
+            "shenaniganscore", "battleground", "ability", "TechniqueHud.java");
+
+    @AfterEach
+    void tearDown() {
+        MockBukkit.unmock();
+    }
 
     @Test
     void noticeWinsUntilItExpires() {
@@ -66,5 +90,85 @@ class ActionBarNoticeTest {
         assertTrue(notice.active(uuid, 100_000L));
         notice.clear(uuid);
         assertFalse(notice.active(uuid, 100_000L));
+    }
+
+    /**
+     * Issue #73: notices leave the action bar (the HUD owns it) and arrive as subtitles.
+     *
+     * <p>MockBukkit's PlayerMock does not record Adventure {@code showTitle}, so the sink is
+     * observed on a recording Player proxy — the component is what production sends.</p>
+     */
+    @Test
+    void showNoticeSendsTheComponentAsASubtitle() {
+        RecordingPlayer player = new RecordingPlayer();
+
+        TechniqueHud.showNotice(player.player, "<red>not ready", 1_500L);
+
+        assertEquals(1, player.subtitles.size(), "exactly one subtitle must be sent");
+        assertEquals("not ready", PLAIN.serialize(player.subtitles.get(0)),
+                "the notice component must be delivered as a subtitle");
+        assertTrue(player.actionBars.isEmpty(), "the action bar belongs to the persistent HUD");
+    }
+
+    /** Issue #73: clearing a notice blanks the subtitle instead of leaving the last text up. */
+    @Test
+    void clearNoticeSendsABlankSubtitle() {
+        RecordingPlayer player = new RecordingPlayer();
+
+        TechniqueHud.showNotice(player.player, "<red>not ready", 1_500L);
+        TechniqueHud.clearNotice(player.player);
+
+        assertEquals(2, player.subtitles.size(), "one notice plus one blank");
+        assertEquals("", PLAIN.serialize(player.subtitles.get(1)),
+                "clearing must blank the subtitle line");
+    }
+
+    /** Issue #73: the 5-tick refresh keeps the action bar for the persistent HUD, not notices. */
+    @Test
+    void refreshDoesNotWriteNoticesToTheActionBar() throws IOException {
+        String hud = Files.readString(HUD, StandardCharsets.UTF_8);
+        assertFalse(hud.contains("indicatorRouter().send(player, notice)"),
+                "a live notice must not be re-sent to the action bar by the HUD refresh");
+        assertTrue(hud.contains("ActionBarView.render(ActionBarView.build(held, normal, ultimate))"),
+                "the persistent HUD must still be what the refresh loop sends");
+    }
+
+    private static final class RecordingPlayer implements InvocationHandler {
+
+        private final List<Component> subtitles = new ArrayList<>();
+        private final List<Component> actionBars = new ArrayList<>();
+        private final Player player = (Player) Proxy.newProxyInstance(
+                ActionBarNoticeTest.class.getClassLoader(),
+                new Class<?>[]{Player.class}, this);
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if (method.getName().equals("showTitle")) {
+                subtitles.add(((Title) args[0]).subtitle());
+                return null;
+            }
+            if (method.getName().equals("sendActionBar")) {
+                actionBars.add((Component) args[0]);
+                return null;
+            }
+            if (method.getName().equals("hashCode")) return System.identityHashCode(proxy);
+            if (method.getName().equals("equals")) return proxy == args[0];
+            if (method.getName().equals("toString")) return "RecordingPlayer";
+            // Anything else (getUniqueId, getLocation, ...) is not needed by the notice sink.
+            return defaultReturn(method.getReturnType());
+        }
+
+        private static Object defaultReturn(Class<?> type) {
+            if (!type.isPrimitive()) return null;
+            if (type == boolean.class) return false;
+            if (type == void.class) return null;
+            if (type == char.class) return (char) 0;
+            if (type == byte.class) return (byte) 0;
+            if (type == short.class) return (short) 0;
+            if (type == int.class) return 0;
+            if (type == long.class) return 0L;
+            if (type == float.class) return 0f;
+            return 0d;
+        }
     }
 }
