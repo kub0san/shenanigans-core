@@ -9,6 +9,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
@@ -62,6 +63,27 @@ class DashSwordRightClickTest {
     }
 
     @Test
+    void anOffHandRightClickWithAMainHandSwordSubmitsNothing() {
+        holdSword();
+
+        server.getPluginManager().callEvent(
+                interact(Action.RIGHT_CLICK_AIR, EquipmentSlot.OFF_HAND));
+
+        assertTrue(submissions.isEmpty(), "Bukkit fires one event per hand; only the main hand casts");
+    }
+
+    @Test
+    void aHandAndOffHandPairFromOneClickSubmitsOnce() {
+        holdSword();
+
+        fire(Action.RIGHT_CLICK_AIR);
+        server.getPluginManager().callEvent(
+                interact(Action.RIGHT_CLICK_AIR, EquipmentSlot.OFF_HAND));
+
+        assertEquals(1, submissions.size(), "one physical click must produce one cast request");
+    }
+
+    @Test
     void rightClickOnABlockSubmitsToo() {
         holdSword();
 
@@ -73,7 +95,7 @@ class DashSwordRightClickTest {
     @Test
     void aCancelledInteractSubmitsNothing() {
         holdSword();
-        PlayerInteractEvent event = interact(Action.RIGHT_CLICK_AIR);
+        PlayerInteractEvent event = interact(Action.RIGHT_CLICK_AIR, EquipmentSlot.HAND);
         event.setCancelled(true);
 
         server.getPluginManager().callEvent(event);
@@ -119,13 +141,13 @@ class DashSwordRightClickTest {
     }
 
     private void fire(Action action) {
-        server.getPluginManager().callEvent(interact(action));
+        server.getPluginManager().callEvent(interact(action, EquipmentSlot.HAND));
     }
 
-    private PlayerInteractEvent interact(Action action) {
+    private PlayerInteractEvent interact(Action action, EquipmentSlot hand) {
         // Synthetic events with no clicked block start cancelled in Bukkit; uncancel so only the
         // cancelled-case test exercises ignoreCancelled.
-        PlayerInteractEvent event = new PlayerInteractEvent(player, action, null, null, null);
+        PlayerInteractEvent event = new PlayerInteractEvent(player, action, null, null, null, hand);
         event.setCancelled(false);
         return event;
     }
