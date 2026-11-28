@@ -13,6 +13,7 @@ import com.hizeric.shenaniganscore.core.ability.AbilityId;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.title.Title;
+import net.kyori.adventure.title.TitlePart;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
@@ -159,10 +160,11 @@ public final class TechniqueHud {
     /** Subtitles have no send-without-duration API; sticky captions are re-sent by the HUD refresh. */
     private static final long NOTICE_MILLIS = 3_000L;
 
+    /** Title parts leave the persistent main title (domain cinematics, "FROZEN", …) untouched. */
     private static void subtitle(Player player, Component text, long stayMillis) {
-        player.showTitle(Title.title(Component.empty(), text,
-                Title.Times.times(Duration.ZERO, Duration.ofMillis(Math.max(1L, stayMillis)),
-                        Duration.ofMillis(200))));
+        player.sendTitlePart(TitlePart.SUBTITLE, text);
+        player.sendTitlePart(TitlePart.TIMES, Title.Times.times(Duration.ZERO,
+                Duration.ofMillis(Math.max(1L, stayMillis)), Duration.ofMillis(200)));
     }
 
     public static void showNotice(Player player, String miniMessage, long durationMillis) {
