@@ -10,9 +10,13 @@ import com.hizeric.shenaniganscore.battleground.indicator.TechniqueGlyphs;
 import com.hizeric.shenaniganscore.battleground.player.BattlegroundPlayer;
 import com.hizeric.shenaniganscore.battleground.shop.ShopEntry;
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.title.Title;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+
+import java.time.Duration;
 
 /**
  * The battleground HUD: one action-bar line of three slots — held custom-item ability,
@@ -45,12 +49,6 @@ public final class TechniqueHud {
         if (state == RoundState.STAGING || state == RoundState.RESTORING || state == RoundState.IDLE) return;
         if (com.hizeric.shenaniganscore.battleground.menu.MenuManager.get().isOpen(player)) return;
         if (plugin.getSessionManager().hasActiveSession(player.getUniqueId())) return;
-
-        String notice = NOTICES.message(player.getUniqueId(), System.currentTimeMillis());
-        if (notice != null) {
-            plugin.indicatorRouter().send(player, notice);
-            return;
-        }
 
         BattlegroundPlayer data = manager.playerStore().get(player.getUniqueId());
         if (data == null) return;
@@ -158,6 +156,9 @@ public final class TechniqueHud {
         return Math.max(0, Math.min(FILL_LEVELS, level));
     }
 
+    /** Subtitles have no send-without-duration API; notices are short, so a fixed 3 s window. */
+    private static final long NOTICE_MILLIS = 3_000L;
+
     public static void showNotice(Player player, String miniMessage, long durationMillis) {
         showNotice(player, ActionBarNotice.Priority.NORMAL, miniMessage, durationMillis, false);
     }
@@ -171,15 +172,16 @@ public final class TechniqueHud {
                                   String miniMessage, long durationMillis, boolean sticky) {
         NOTICES.show(player.getUniqueId(), priority, miniMessage,
                 System.currentTimeMillis(), durationMillis, sticky);
-        ShenanigansCore plugin = ShenanigansCore.getInstance();
-        if (plugin != null && plugin.indicatorRouter() != null) {
-            plugin.indicatorRouter().send(player, miniMessage);
-        } else {
-            player.sendActionBar(MM.deserialize(miniMessage));
-        }
+        // The action bar belongs to the persistent HUD; notices go to the subtitle line.
+        player.showTitle(Title.title(Component.empty(), MM.deserialize(miniMessage),
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(NOTICE_MILLIS),
+                        Duration.ofMillis(200))));
     }
 
     public static void clearNotice(Player player) {
         NOTICES.clear(player.getUniqueId());
+        player.showTitle(Title.title(Component.empty(), Component.empty(),
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(NOTICE_MILLIS),
+                        Duration.ofMillis(200))));
     }
 }
