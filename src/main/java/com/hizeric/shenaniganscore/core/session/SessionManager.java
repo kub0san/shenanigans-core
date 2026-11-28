@@ -1,5 +1,6 @@
 package com.hizeric.shenaniganscore.core.session;
 
+import com.hizeric.shenaniganscore.battleground.ability.TechniqueHud;
 import com.hizeric.shenaniganscore.core.terrain.DomainFloorRestoreLedger;
 import org.bukkit.Location;
 
@@ -43,6 +44,8 @@ public class SessionManager {
         }
         session.capture();
         session.activate();
+        // Issue #73: a domain owns the caption; no notice from the cast may linger.
+        TechniqueHud.clearNotice(session.getCaster());
         return true;
     }
 

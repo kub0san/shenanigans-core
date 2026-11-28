@@ -136,6 +136,7 @@ final class RoundController {
         for (UUID uuid : m.deployed) {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null && player.isOnline()) {
+                com.hizeric.shenaniganscore.battleground.ability.TechniqueHud.refreshNotice(player);
                 com.hizeric.shenaniganscore.battleground.ability.TechniqueHud.send(m.plugin, player);
             }
         }

@@ -1,8 +1,12 @@
 package com.hizeric.shenaniganscore.battleground.ability;
 
+import com.hizeric.shenaniganscore.core.session.DomainSession;
+import com.hizeric.shenaniganscore.core.session.SessionManager;
+import com.hizeric.shenaniganscore.core.terrain.DomainFloorRestoreLedger;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.kyori.adventure.title.Title;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +34,8 @@ class ActionBarNoticeTest {
     private static final PlainTextComponentSerializer PLAIN = PlainTextComponentSerializer.plainText();
     private static final Path HUD = Path.of("src", "main", "java", "com", "hizeric",
             "shenaniganscore", "battleground", "ability", "TechniqueHud.java");
+    private static final Path CONTROLLER = Path.of("src", "main", "java", "com", "hizeric",
+            "shenaniganscore", "battleground", "RoundController.java");
 
     @AfterEach
     void tearDown() {
@@ -133,10 +139,76 @@ class ActionBarNoticeTest {
                 "the persistent HUD must still be what the refresh loop sends");
     }
 
+    /** Issue #73: a live sticky caption follows the HUD refresh and is released exactly once. */
+    @Test
+    void stickyNoticeIsResentOnRefreshUntilCleared() {
+        RecordingPlayer player = new RecordingPlayer();
+
+        TechniqueHud.showNotice(player.player, ActionBarNotice.Priority.HIGH,
+                "<red>hold", 100L, true);
+        TechniqueHud.refreshNotice(player.player);
+        TechniqueHud.refreshNotice(player.player);
+
+        assertEquals(3, player.subtitles.size(), "each refresh re-sends the sticky caption");
+        assertEquals("hold", PLAIN.serialize(player.subtitles.get(2)));
+
+        TechniqueHud.clearNotice(player.player);
+        assertEquals(4, player.subtitles.size(), "release sends exactly one blank caption");
+        assertEquals("", PLAIN.serialize(player.subtitles.get(3)));
+
+        TechniqueHud.refreshNotice(player.player);
+        assertEquals(4, player.subtitles.size(), "a released notice must not come back");
+        assertTrue(player.actionBars.isEmpty(), "refresh keeps the action bar for the HUD");
+    }
+
+    /** Issue #73: an expired or one-shot notice must not be replayed by the refresh. */
+    @Test
+    void refreshSkipsExpiredAndOneShotNotices() {
+        RecordingPlayer player = new RecordingPlayer();
+
+        TechniqueHud.showNotice(player.player, "<red>once", 0L);
+        TechniqueHud.refreshNotice(player.player);
+
+        assertEquals(1, player.subtitles.size(), "only the original one-shot subtitle is sent");
+    }
+
+    /** Issue #73: starting a domain blanks a lingering caption once, on the success path only. */
+    @Test
+    void domainStartClearsTheStickyCaption() {
+        DomainFloorRestoreLedger.cancelReplay();
+        RecordingPlayer player = new RecordingPlayer();
+        SessionManager sessions = new SessionManager();
+
+        TechniqueHud.showNotice(player.player, ActionBarNotice.Priority.HIGH,
+                "<red>hold", 100L, true);
+        assertTrue(sessions.startSession(new DomainSession(player.player,
+                new Location(null, 0, 64, 0), 4) {
+            @Override public void close() { }
+        }));
+
+        assertEquals(2, player.subtitles.size(), "domain start sends exactly one blank caption");
+        assertEquals("", PLAIN.serialize(player.subtitles.get(1)));
+
+        TechniqueHud.refreshNotice(player.player);
+        assertEquals(2, player.subtitles.size(), "the cleared caption must stay cleared");
+    }
+
+    /** Issue #73: the 5-tick refresh loop, not send(), owns sticky replay. */
+    @Test
+    void hudRefreshLoopReplaysStickyNotices() throws IOException {
+        String controller = Files.readString(CONTROLLER, StandardCharsets.UTF_8);
+        int start = controller.indexOf("private void tickHud()");
+        int end = controller.indexOf("private void tickClock()", start);
+        assertTrue(start >= 0 && end > start);
+        assertTrue(controller.substring(start, end).contains("TechniqueHud.refreshNotice(player)"),
+                "the HUD refresh must replay sticky notices");
+    }
+
     private static final class RecordingPlayer implements InvocationHandler {
 
         private final List<Component> subtitles = new ArrayList<>();
         private final List<Component> actionBars = new ArrayList<>();
+        private final UUID uuid = UUID.randomUUID();
         private final Player player = (Player) Proxy.newProxyInstance(
                 ActionBarNoticeTest.class.getClassLoader(),
                 new Class<?>[]{Player.class}, this);
@@ -151,10 +223,11 @@ class ActionBarNoticeTest {
                 actionBars.add((Component) args[0]);
                 return null;
             }
+            if (method.getName().equals("getUniqueId")) return uuid;
+            if (method.getName().equals("getLocation")) return new Location(null, 0, 64, 0);
             if (method.getName().equals("hashCode")) return System.identityHashCode(proxy);
             if (method.getName().equals("equals")) return proxy == args[0];
             if (method.getName().equals("toString")) return "RecordingPlayer";
-            // Anything else (getUniqueId, getLocation, ...) is not needed by the notice sink.
             return defaultReturn(method.getReturnType());
         }
 

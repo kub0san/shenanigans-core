@@ -156,8 +156,14 @@ public final class TechniqueHud {
         return Math.max(0, Math.min(FILL_LEVELS, level));
     }
 
-    /** Subtitles have no send-without-duration API; notices are short, so a fixed 3 s window. */
+    /** Subtitles have no send-without-duration API; sticky captions are re-sent by the HUD refresh. */
     private static final long NOTICE_MILLIS = 3_000L;
+
+    private static void subtitle(Player player, Component text, long stayMillis) {
+        player.showTitle(Title.title(Component.empty(), text,
+                Title.Times.times(Duration.ZERO, Duration.ofMillis(Math.max(1L, stayMillis)),
+                        Duration.ofMillis(200))));
+    }
 
     public static void showNotice(Player player, String miniMessage, long durationMillis) {
         showNotice(player, ActionBarNotice.Priority.NORMAL, miniMessage, durationMillis, false);
@@ -173,15 +179,18 @@ public final class TechniqueHud {
         NOTICES.show(player.getUniqueId(), priority, miniMessage,
                 System.currentTimeMillis(), durationMillis, sticky);
         // The action bar belongs to the persistent HUD; notices go to the subtitle line.
-        player.showTitle(Title.title(Component.empty(), MM.deserialize(miniMessage),
-                Title.Times.times(Duration.ZERO, Duration.ofMillis(NOTICE_MILLIS),
-                        Duration.ofMillis(200))));
+        subtitle(player, MM.deserialize(miniMessage), sticky ? NOTICE_MILLIS : durationMillis);
     }
 
     public static void clearNotice(Player player) {
         NOTICES.clear(player.getUniqueId());
-        player.showTitle(Title.title(Component.empty(), Component.empty(),
-                Title.Times.times(Duration.ZERO, Duration.ofMillis(NOTICE_MILLIS),
-                        Duration.ofMillis(200))));
+        subtitle(player, Component.empty(), NOTICE_MILLIS);
+    }
+
+    /** Re-sends a live sticky caption on the HUD refresh; one-shot notices are not replayed. */
+    public static void refreshNotice(Player player) {
+        if (player == null) return;
+        String message = NOTICES.stickyMessage(player.getUniqueId(), System.currentTimeMillis());
+        if (message != null) subtitle(player, MM.deserialize(message), NOTICE_MILLIS);
     }
 }

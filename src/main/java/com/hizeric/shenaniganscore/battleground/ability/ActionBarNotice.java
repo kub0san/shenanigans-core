@@ -64,6 +64,20 @@ public final class ActionBarNotice {
         return notice.message();
     }
 
+    /**
+     * @return the live sticky message (dropping any expired entry), or {@code null} when the
+     *         notice was released, expired or never sticky.
+     */
+    public String stickyMessage(UUID uuid, long now) {
+        Notice notice = uuid == null ? null : notices.get(uuid);
+        if (notice == null) return null;
+        if (notice.expiresAt() <= now) {
+            notices.remove(uuid, notice);
+            return null;
+        }
+        return notice.sticky() ? notice.message() : null;
+    }
+
     public void clear(UUID uuid) {
         if (uuid != null) notices.remove(uuid);
     }
