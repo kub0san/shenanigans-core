@@ -22,6 +22,9 @@ class ReloadSafetyWiringTest {
             "shenaniganscore", "ShenanigansCore.java");
     private static final Path CLIENT_BLOCKS = Path.of("src", "main", "java", "com", "hizeric",
             "shenaniganscore", "core", "util", "ClientBlockUtils.java");
+    private static final Path WIND_TRAIL = Path.of("src", "main", "java", "com", "hizeric",
+            "shenaniganscore", "origins", "minecraft", "weapons", "dashsword",
+            "WindTrailEffect.java");
 
     private static String block(String source, String start, String end) {
         int from = source.indexOf(start);
@@ -177,6 +180,25 @@ class ReloadSafetyWiringTest {
                 "DashVisibilityMask.shutdown() must run before cancelTasks kills the dash timelines");
         assertTrue(disable.contains("runSafely(\"dash visibility\""),
                 "the dash-visibility teardown must be isolated so one failure cannot strand the rest");
+    }
+
+    @Test
+    void windTrailHasStaticShutdown() throws IOException {
+        assertTrue(Files.isRegularFile(WIND_TRAIL), "expected source at " + WIND_TRAIL.toAbsolutePath());
+        String source = Files.readString(WIND_TRAIL, StandardCharsets.UTF_8);
+        // Source-pin: a live trail must be closed on plugin disable, not just left to the timeline.
+        assertTrue(source.contains("static final Set<WindTrailEffect> ACTIVE"),
+                "WindTrailEffect must keep a static registry of live instances");
+        assertTrue(source.contains("ACTIVE.add(this)"),
+                "the constructor must register the instance in ACTIVE");
+        assertTrue(source.contains("ACTIVE.remove(this)"),
+                "close() must deregister the instance from ACTIVE");
+        assertTrue(source.contains("public static void shutdown()"),
+                "WindTrailEffect must expose a static shutdown() for the disable path");
+        assertTrue(source.contains("new ArrayList<>(ACTIVE)"),
+                "shutdown() must close a stable snapshot of ACTIVE");
+        assertTrue(source.contains("entry.close()"),
+                "shutdown() must close each snapshotted instance");
     }
 
     @Test
