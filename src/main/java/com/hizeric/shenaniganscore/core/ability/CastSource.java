@@ -1,9 +1,11 @@
 package com.hizeric.shenaniganscore.core.ability;
 
-/** How a cast was initiated. The battleground exposes a single command-driven cast path. */
+/** How a cast was initiated. Player-reachable sources share the same cast funnel. */
 public enum CastSource {
-    /** {@code /ability 1..3} — the only supported cast path. */
+    /** {@code /ability 1..3} — the universal fallback. */
     COMMAND,
+    /** A held custom item (right-click) submits a cast for its rail slot. */
+    ITEM,
     /**
      * Admin debug cast from {@code /bg debug ability <id>}: gateless, cooldown-free, and no
      * {@code TechniqueFx.burst} — mirrors the old {@code AbilityDefinition.perform}-only behavior

@@ -33,6 +33,7 @@ import com.hizeric.shenaniganscore.battleground.storage.DatabaseException;
 import com.hizeric.shenaniganscore.battleground.storage.Databases;
 import com.hizeric.shenaniganscore.core.ability.AbilityCaster;
 import com.hizeric.shenaniganscore.core.ability.AbilityRegistry;
+import com.hizeric.shenaniganscore.core.ability.CastTriggerService;
 import com.hizeric.shenaniganscore.core.ability.ListenerSink;
 import com.hizeric.shenaniganscore.core.ability.RegistrationContext;
 import com.hizeric.shenaniganscore.core.cooldown.CooldownManager;
@@ -92,6 +93,7 @@ public final class ShenanigansCore extends JavaPlugin {
     private CooldownManager cooldownManager;
     private AbilityRegistry abilityRegistry;
     private AbilityCaster abilityCaster;
+    private CastTriggerService castTriggerService;
     private BattlegroundManager battlegroundManager;
     private DiffRecorder diffRecorder;
     private AsyncDiffWriter diffWriter;
@@ -251,6 +253,8 @@ public final class ShenanigansCore extends JavaPlugin {
                 DiffRecorder.domainClaims(),
                 diffWriter::enqueue);
         this.battlegroundManager.enable();
+        this.castTriggerService = new CastTriggerService(
+                battlegroundManager, abilityCaster, cooldownManager);
 
         // Battleground GUI foundation: layout invariants + the shared session.
         GuiLayoutChecks.verify();
@@ -467,6 +471,7 @@ public final class ShenanigansCore extends JavaPlugin {
         cooldownManager = null;
         abilityRegistry = null;
         abilityCaster = null;
+        castTriggerService = null;
         globalKitService = null;
         indicatorRouter = null;
         battlegroundGui = null;
@@ -553,6 +558,10 @@ public final class ShenanigansCore extends JavaPlugin {
 
     public AbilityCaster getAbilityCaster() {
         return abilityCaster;
+    }
+
+    public CastTriggerService getCastTriggerService() {
+        return castTriggerService;
     }
 
     public GlobalKitService globalKitService() { return globalKitService; }
