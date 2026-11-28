@@ -183,6 +183,23 @@ class ReloadSafetyWiringTest {
     }
 
     @Test
+    void windTrailShutdownHookRunsBeforeCancelTasks() throws IOException {
+        String source = Files.readString(MAIN, StandardCharsets.UTF_8);
+        int from = source.indexOf("public void onDisable() {");
+        int to = source.indexOf("private void runSafely(", from);
+        assertTrue(from >= 0 && to > from, "could not delimit onDisable() body");
+        String disable = source.substring(from, to);
+        int hook = disable.indexOf("WindTrailEffect.shutdown()");
+        int sweep = disable.indexOf("Bukkit.getScheduler().cancelTasks(this)");
+        assertTrue(hook > 0,
+                "onDisable must close any live dash wind trails explicitly before the task sweep");
+        assertTrue(sweep > hook,
+                "WindTrailEffect.shutdown() must run before cancelTasks kills the dash timelines");
+        assertTrue(disable.contains("runSafely(\"dash wind trails\""),
+                "the dash wind-trail teardown must be isolated so one failure cannot strand the rest");
+    }
+
+    @Test
     void windTrailHasStaticShutdown() throws IOException {
         assertTrue(Files.isRegularFile(WIND_TRAIL), "expected source at " + WIND_TRAIL.toAbsolutePath());
         String source = Files.readString(WIND_TRAIL, StandardCharsets.UTF_8);
