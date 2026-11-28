@@ -24,7 +24,6 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +63,7 @@ public final class MannequinEchoRenderer {
     private final ItemProfile skin;
     private final Map<Integer, Echo> echoes = new LinkedHashMap<>();
     private final Map<UUID, Viewer> viewers = new HashMap<>();
+    private final EchoCapability capability = new EchoCapability();
     private boolean closed;
 
     public MannequinEchoRenderer(Player caster) {
@@ -92,13 +92,17 @@ public final class MannequinEchoRenderer {
 
     /** Spawn one static echo at {@code point}, facing the same way as the caster at spawn time. */
     public void spawn(Location point, float yaw, float pitch, int bornTick) {
-        if (closed) return;
+        if (closed || capability.disabled()) return;
         PacketEventsBridge.requireReady();
         syncViewers();
+        if (closed) return;
         Echo echo = new Echo(SpigotReflectionUtil.generateEntityId(), UUID.randomUUID(),
                 point.getX(), point.getY(), point.getZ(), yaw, pitch, bornTick);
         echoes.put(echo.id, echo);
-        for (Viewer viewer : viewers.values()) {
+        // Snapshot: a send() failure trips the capability and calls close(), which clears the
+        // live maps; iterating a copy keeps that teardown from corrupting this loop.
+        for (Viewer viewer : new ArrayList<>(viewers.values())) {
+            if (closed) break;
             ensureTeam(viewer);
             sendSpawn(viewer.player, echo);
             sendMeta(viewer.player, echo);
@@ -109,13 +113,14 @@ public final class MannequinEchoRenderer {
 
     /** Drop the echoes that reached {@link DashAnimation#GHOST_LIFE}; survivors stay full size. */
     public void tick(int currentTick) {
-        if (closed || !PacketEventsBridge.isReady()) return;
+        if (closed || capability.disabled() || !PacketEventsBridge.isReady()) return;
         syncViewers();
-        for (Iterator<Echo> it = echoes.values().iterator(); it.hasNext(); ) {
-            Echo echo = it.next();
+        if (closed) return;
+        for (Echo echo : new ArrayList<>(echoes.values())) {
+            if (closed) return;
             if (currentTick - echo.bornTick >= DashAnimation.GHOST_LIFE) {
                 despawn(echo);
-                it.remove();
+                echoes.remove(echo.id);
             }
         }
     }
@@ -146,20 +151,24 @@ public final class MannequinEchoRenderer {
             } catch (Throwable ignored) {
                 // Teardown must never abort other cleanup hooks.
             }
+            // Re-enable the capability so a same-classloader reload starts fresh.
+            renderer.capability.reset();
         }
     }
 
     // ------------------------------------------------------------------ viewers
 
     private void syncViewers() {
+        if (capability.disabled()) return;
         if (caster == null || !caster.isOnline()) return;
         World world = caster.getWorld();
         Location here = caster.getLocation();
 
         // Drop viewers who left the world, logged out or walked out of range, taking their
         // client-side copies with them so entity ids and the team never linger on those clients.
-        for (Iterator<Map.Entry<UUID, Viewer>> it = viewers.entrySet().iterator(); it.hasNext(); ) {
-            Viewer viewer = it.next().getValue();
+        for (Map.Entry<UUID, Viewer> entry : new ArrayList<>(viewers.entrySet())) {
+            if (closed) return;
+            Viewer viewer = entry.getValue();
             Player player = viewer.player;
             boolean keep = player.isOnline() && player.getWorld() == world
                     && (player.getUniqueId().equals(caster.getUniqueId())
@@ -171,7 +180,7 @@ public final class MannequinEchoRenderer {
             if (viewer.teamCreated) {
                 sendTeam(player, WrapperPlayServerTeams.TeamMode.REMOVE, null);
             }
-            it.remove();
+            viewers.remove(entry.getKey());
         }
 
         // Caster always sees their own echoes; nearby players see them too. A viewer entering
@@ -185,9 +194,11 @@ public final class MannequinEchoRenderer {
             }
         }
         for (Player player : candidates) {
+            if (closed) return;
             Viewer viewer = viewers.computeIfAbsent(player.getUniqueId(), k -> new Viewer(player));
             ensureTeam(viewer);
-            for (Echo echo : echoes.values()) {
+            for (Echo echo : new ArrayList<>(echoes.values())) {
+                if (closed) return;
                 if (!viewer.spawned.add(echo.id)) continue;
                 sendSpawn(player, echo);
                 sendMeta(player, echo);
@@ -204,7 +215,8 @@ public final class MannequinEchoRenderer {
     }
 
     private void despawn(Echo echo) {
-        for (Viewer viewer : viewers.values()) {
+        for (Viewer viewer : new ArrayList<>(viewers.values())) {
+            if (closed) return;
             if (!viewer.spawned.remove(echo.id)) continue;
             send(viewer.player, new WrapperPlayServerDestroyEntities(echo.id));
             if (viewer.teamCreated) {
@@ -244,7 +256,7 @@ public final class MannequinEchoRenderer {
                 entity == null ? List.of() : List.of(entity)));
     }
 
-    private static void send(Player player, PacketWrapper<?> packet) {
+    private void send(Player player, PacketWrapper<?> packet) {
         if (player == null || !player.isOnline()) return;
         // Public entry points call requireReady(); teardown is defensive because PacketEvents may
         // already be disabled when the plugin is being unloaded.
@@ -252,10 +264,16 @@ public final class MannequinEchoRenderer {
         try {
             PacketEvents.getAPI().getPlayerManager().sendPacket(player, packet);
         } catch (Throwable t) {
-            ShenanigansCore plugin = ShenanigansCore.getInstance();
-            if (plugin != null) {
-                plugin.getLogger().warning("Failed to send mannequin echo packet to "
-                        + player.getName() + ": " + t.getMessage());
+            // First failure trips the capability once, logs a single warning and tears down the
+            // echoes for this dash; later failures stay silent so a broken metadata path cannot
+            // spam the log every packet.
+            if (capability.trip(t)) {
+                ShenanigansCore plugin = ShenanigansCore.getInstance();
+                if (plugin != null) {
+                    plugin.getLogger().warning("Mannequin echo packets disabled for this dash after a "
+                            + "send failure to " + player.getName() + ": " + t.getMessage());
+                }
+                close();
             }
         }
     }
