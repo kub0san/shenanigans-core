@@ -7,8 +7,9 @@ import com.hizeric.shenaniganscore.core.ability.CastSource;
 import org.bukkit.entity.Player;
 
 /**
- * The only cast path: <code>/ability 1|2|3</code> (alias <code>/ab</code>). No right-click,
- * keybind or item inputs. Declared on the shared {@link Cmd} tree.
+ * A cast path: <code>/ability 1|2|3</code> (alias <code>/ab</code>) — the universal fallback
+ * alongside the held Dash Sword's right-click trigger. No keybind inputs. Declared on the shared
+ * {@link Cmd} tree.
  *
  * Slot precedence: {@code /ability 1} casts the held custom item's ability (rail slot 0) - the
  * cast is driven by the held item, so when nothing is held the slot reports empty and the
