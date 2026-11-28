@@ -15,6 +15,8 @@ import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Display-entity wind/breeze visuals for the Rift Cleave dash.
@@ -61,6 +63,8 @@ public final class WindTrailEffect {
     };
 
     private static final Vector3f PIVOT = new Vector3f(0.5f, 0.5f, 0.5f);
+
+    private static final Set<WindTrailEffect> ACTIVE = ConcurrentHashMap.newKeySet();
 
     private enum Type { RING, GUST, STREAK }
 
@@ -121,6 +125,7 @@ public final class WindTrailEffect {
         this.up = this.right.clone().crossProduct(this.forward).normalize();
         this.facing = new Vector3f(
                 (float) this.forward.getX(), (float) this.forward.getY(), (float) this.forward.getZ());
+        ACTIVE.add(this);
     }
 
     /** Dramatic launch visuals: a large WIND_CHARGE ring plus stretched white wind gusts. */
@@ -223,8 +228,20 @@ public final class WindTrailEffect {
     public void close() {
         if (closed) return;
         closed = true;
+        ACTIVE.remove(this);
         for (Tracked entry : tracked) remove(entry.display);
         tracked.clear();
+    }
+
+    /** PlugManX / reload safety net — close every live trail on plugin disable before cancelTasks. */
+    public static void shutdown() {
+        for (WindTrailEffect entry : new ArrayList<>(ACTIVE)) {
+            try {
+                entry.close();
+            } catch (Throwable ignored) {
+                // Teardown must never abort other cleanup hooks.
+            }
+        }
     }
 
     /** Unit radial direction in the plane perpendicular to the dash direction. */
