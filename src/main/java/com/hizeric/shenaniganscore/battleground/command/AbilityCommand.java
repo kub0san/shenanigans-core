@@ -5,6 +5,7 @@ import com.hizeric.shenaniganscore.battleground.BattlegroundManager;
 import com.hizeric.shenaniganscore.battleground.ability.AbilityRail;
 import com.hizeric.shenaniganscore.battleground.ability.CastInput;
 import com.hizeric.shenaniganscore.battleground.ability.HeldItemAbility;
+import com.hizeric.shenaniganscore.battleground.ability.TechniqueHud;
 import com.hizeric.shenaniganscore.battleground.economy.EconomyService;
 import com.hizeric.shenaniganscore.battleground.player.BattlegroundPlayer;
 import com.hizeric.shenaniganscore.core.ability.AbilityId;
@@ -21,6 +22,8 @@ import org.bukkit.entity.Player;
  * the rail's normal and ultimate bindings (slots 1 and 2).
  */
 public final class AbilityCommand {
+
+    private static final long NOTICE_MILLIS = 3_000L;
 
     private final ShenanigansCore plugin;
     private final CommandNode root;
@@ -66,10 +69,11 @@ public final class AbilityCommand {
             id = manager.heldItemAbility(player);
         }
         if (id == null) {
-            ctx.reply(slot == HeldItemAbility.SLOT
+            TechniqueHud.showNotice(player, slot == HeldItemAbility.SLOT
                     ? "<yellow>Hold your custom item to use slot <white>1<yellow>."
                     : "<yellow>Slot <white>" + (slot + 1)
-                            + "<yellow> is empty. Bind one from the hub's <white>Loadout<yellow> screen.");
+                            + "<yellow> is empty. Bind one from the hub's <white>Loadout<yellow> screen.",
+                    NOTICE_MILLIS);
             return;
         }
 
@@ -94,25 +98,30 @@ public final class AbilityCommand {
             case CAST -> plugin.getAbilityCaster().cast(player, id, CastSource.COMMAND);
             case NOT_READY -> {
                 if (result.reason() == CastInput.Reason.STREAK_NOT_MET) {
-                    ctx.reply("<yellow>Need <white>" + gate.required() + "<white> kills for <white>"
-                            + ctx.escape(id.value()));
+                    TechniqueHud.showNotice(player, "<yellow>Need <white>" + gate.required()
+                            + "<white> kills for <white>" + ctx.escape(id.value()), NOTICE_MILLIS);
                 } else if (result.reason() == CastInput.Reason.ON_COOLDOWN) {
-                    ctx.reply("<yellow>Not ready yet — " + ctx.escape(id.value())
-                            + " is on cooldown for <white>" + cooldownSeconds + "<white>s.");
+                    TechniqueHud.showNotice(player, "<yellow>Not ready yet — " + ctx.escape(id.value())
+                            + " is on cooldown for <white>" + cooldownSeconds + "<white>s.",
+                            NOTICE_MILLIS);
                 } else {
-                    ctx.reply("<yellow>Not ready yet.");
+                    TechniqueHud.showNotice(player, "<yellow>Not ready yet.", NOTICE_MILLIS);
                 }
             }
             case IGNORE -> {
                 switch (result.reason()) {
-                    case NOT_DEPLOYED -> ctx.reply("<yellow>Join a round before casting.");
-                    case NOT_OWNED -> ctx.reply("<yellow>You have not unlocked <white>"
-                            + ctx.escape(id.value()) + "<yellow>.");
-                    case HELD_ITEM_MISMATCH -> ctx.reply(
-                            "<yellow>Hold your custom item to use slot <white>1<yellow>.");
-                    case ULTIMATE_NOT_BOUND -> ctx.reply("<yellow>Your ultimate slot is empty.");
-                    case BAD_SLOT -> ctx.reply("<yellow>That cast slot does not exist.");
-                    default -> ctx.reply("<yellow>You cannot cast that right now.");
+                    case NOT_DEPLOYED -> TechniqueHud.showNotice(player,
+                            "<yellow>Join a round before casting.", NOTICE_MILLIS);
+                    case NOT_OWNED -> TechniqueHud.showNotice(player, "<yellow>You have not unlocked <white>"
+                            + ctx.escape(id.value()) + "<yellow>.", NOTICE_MILLIS);
+                    case HELD_ITEM_MISMATCH -> TechniqueHud.showNotice(player,
+                            "<yellow>Hold your custom item to use slot <white>1<yellow>.", NOTICE_MILLIS);
+                    case ULTIMATE_NOT_BOUND -> TechniqueHud.showNotice(player,
+                            "<yellow>Your ultimate slot is empty.", NOTICE_MILLIS);
+                    case BAD_SLOT -> TechniqueHud.showNotice(player,
+                            "<yellow>That cast slot does not exist.", NOTICE_MILLIS);
+                    default -> TechniqueHud.showNotice(player,
+                            "<yellow>You cannot cast that right now.", NOTICE_MILLIS);
                 }
             }
         }

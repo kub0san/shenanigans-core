@@ -1,7 +1,7 @@
 package com.hizeric.shenaniganscore.core.ability;
 
+import com.hizeric.shenaniganscore.battleground.ability.TechniqueHud;
 import com.hizeric.shenaniganscore.core.cooldown.CooldownManager;
-import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.entity.Player;
 
 import java.util.List;
@@ -30,7 +30,6 @@ public final class AbilityCaster {
     private final CooldownManager cooldowns;
     private final Logger logger;
     private final List<Gate> gates = new CopyOnWriteArrayList<>();
-    private final MiniMessage miniMessage = MiniMessage.miniMessage();
 
     public AbilityCaster(AbilityRegistry registry, CooldownManager cooldowns) {
         this(registry, cooldowns, null);
@@ -118,6 +117,6 @@ public final class AbilityCaster {
     }
 
     private void fail(Player player, String message) {
-        player.sendMessage(miniMessage.deserialize(message));
+        TechniqueHud.showNotice(player, message, 3_000L);
     }
 }
