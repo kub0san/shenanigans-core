@@ -6,6 +6,7 @@ import com.hizeric.shenaniganscore.core.terrain.DomainFloorRestoreLedger;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import net.kyori.adventure.title.Title;
+import net.kyori.adventure.title.TitlePart;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +20,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -101,8 +103,8 @@ class ActionBarNoticeTest {
     /**
      * Issue #73: notices leave the action bar (the HUD owns it) and arrive as subtitles.
      *
-     * <p>MockBukkit's PlayerMock does not record Adventure {@code showTitle}, so the sink is
-     * observed on a recording Player proxy — the component is what production sends.</p>
+     * <p>The sink is observed on a recording Player proxy so we can check both the title parts
+     * sent and the absence of {@code showTitle}, which would wipe the main title.</p>
      */
     @Test
     void showNoticeSendsTheComponentAsASubtitle() {
@@ -113,6 +115,12 @@ class ActionBarNoticeTest {
         assertEquals(1, player.subtitles.size(), "exactly one subtitle must be sent");
         assertEquals("not ready", PLAIN.serialize(player.subtitles.get(0)),
                 "the notice component must be delivered as a subtitle");
+        assertEquals(0, player.showTitleCalls, "a notice must never replace the main title");
+        assertEquals(0, player.titleParts, "a notice must never send a title part");
+        assertEquals(1, player.times.size(), "the one-shot caption keeps its duration");
+        assertEquals(Duration.ZERO, player.times.get(0).fadeIn());
+        assertEquals(Duration.ofMillis(1_500L), player.times.get(0).stay());
+        assertEquals(Duration.ofMillis(200L), player.times.get(0).fadeOut());
         assertTrue(player.actionBars.isEmpty(), "the action bar belongs to the persistent HUD");
     }
 
@@ -127,6 +135,8 @@ class ActionBarNoticeTest {
         assertEquals(2, player.subtitles.size(), "one notice plus one blank");
         assertEquals("", PLAIN.serialize(player.subtitles.get(1)),
                 "clearing must blank the subtitle line");
+        assertEquals(0, player.showTitleCalls, "clearing must not replace the main title");
+        assertEquals(0, player.titleParts, "clearing must not send a title part");
     }
 
     /** Issue #73: the 5-tick refresh keeps the action bar for the persistent HUD, not notices. */
@@ -158,6 +168,8 @@ class ActionBarNoticeTest {
 
         TechniqueHud.refreshNotice(player.player);
         assertEquals(4, player.subtitles.size(), "a released notice must not come back");
+        assertEquals(0, player.showTitleCalls, "sticky replay and release must not replace the main title");
+        assertEquals(0, player.titleParts, "sticky replay and release must not send a title part");
         assertTrue(player.actionBars.isEmpty(), "refresh keeps the action bar for the HUD");
     }
 
@@ -170,6 +182,8 @@ class ActionBarNoticeTest {
         TechniqueHud.refreshNotice(player.player);
 
         assertEquals(1, player.subtitles.size(), "only the original one-shot subtitle is sent");
+        assertEquals(0, player.showTitleCalls, "refresh must not replace the main title");
+        assertEquals(0, player.titleParts, "refresh must not send a title part");
     }
 
     /** Issue #73: starting a domain blanks a lingering caption once, on the success path only. */
@@ -191,6 +205,8 @@ class ActionBarNoticeTest {
 
         TechniqueHud.refreshNotice(player.player);
         assertEquals(2, player.subtitles.size(), "the cleared caption must stay cleared");
+        assertEquals(0, player.showTitleCalls, "domain start must not replace the main title");
+        assertEquals(0, player.titleParts, "domain start must not send a title part");
     }
 
     /** Issue #73: the 5-tick refresh loop, not send(), owns sticky replay. */
@@ -208,6 +224,9 @@ class ActionBarNoticeTest {
 
         private final List<Component> subtitles = new ArrayList<>();
         private final List<Component> actionBars = new ArrayList<>();
+        private final List<Title.Times> times = new ArrayList<>();
+        private int showTitleCalls;
+        private int titleParts;
         private final UUID uuid = UUID.randomUUID();
         private final Player player = (Player) Proxy.newProxyInstance(
                 ActionBarNoticeTest.class.getClassLoader(),
@@ -216,7 +235,13 @@ class ActionBarNoticeTest {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) {
             if (method.getName().equals("showTitle")) {
-                subtitles.add(((Title) args[0]).subtitle());
+                showTitleCalls++;
+                return null;
+            }
+            if (method.getName().equals("sendTitlePart")) {
+                if (args[0] == TitlePart.SUBTITLE) subtitles.add((Component) args[1]);
+                if (args[0] == TitlePart.TITLE) titleParts++;
+                if (args[0] == TitlePart.TIMES) times.add((Title.Times) args[1]);
                 return null;
             }
             if (method.getName().equals("sendActionBar")) {
